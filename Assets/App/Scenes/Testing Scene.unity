@@ -285,7 +285,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c23196d1e3c9a0b47858bd68bcb77e2b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DentSource
-  radius: 0.5
+  shape: 0
+  innerRadius: 0.25
+  outerRadius: 0.5
+  axialReach: 0.15
   intensity: 1
 --- !u!4 &99469746
 Transform:
@@ -295,13 +298,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 99469744}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: -1.57, y: 2.59, z: 0.254}
+  m_LocalRotation: {x: 0.1622934, y: 0.68998057, z: -0.094718635, w: 0.69901085}
+  m_LocalPosition: {x: -1.431, y: 2.481, z: 0.248}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 20.953, y: 90.296, z: 5.625}
 --- !u!1001 &531405046
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -652,7 +655,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::DentManager
   targetRenderer: {fileID: 531405049}
   stampMaterial: {fileID: 2100000, guid: 6593a7ea94a518844b433590a9867d20, type: 2}
-  format: 16
+  format: 2
   decayPerSecond: 0.5
   globalTextureName: _CustomRT_Dents
   debugStampAll: 0

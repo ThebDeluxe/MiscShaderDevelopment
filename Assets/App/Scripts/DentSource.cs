@@ -28,7 +28,7 @@ public class DentSource : MonoBehaviour
     [Tooltip("Falls off to nothing at this radius. Must be larger than inner radius.")]
     public float outerRadius = 0.2f;
 
-    [Tooltip("Flat only: how far the dent reaches along +Z.")]
+    [Tooltip("Flat only: how far the dent reaches forward from the flat face, along +Z.")]
     public float axialReach = 0.15f;
 
     [Tooltip("How far vertices are pushed, before Max Dent Depth on the material.")]
@@ -66,21 +66,21 @@ public class DentSource : MonoBehaviour
         else
         {
 #if UNITY_EDITOR
-            // Discs perpendicular to +Z, drawn at both ends of the axial reach.
+            // The flat face sits at the origin; the dent presses forward to +Z * axialReach.
             Handles.color = inner;
+            Handles.DrawWireDisc(p, fwd, innerRadius);
             Handles.DrawWireDisc(p + fwd * axialReach, fwd, innerRadius);
-            Handles.DrawWireDisc(p - fwd * axialReach, fwd, innerRadius);
             Handles.color = outer;
+            Handles.DrawWireDisc(p, fwd, outerRadius);
             Handles.DrawWireDisc(p + fwd * axialReach, fwd, outerRadius);
-            Handles.DrawWireDisc(p - fwd * axialReach, fwd, outerRadius);
 
-            // Side rails so the extent along the axis is readable.
+            // Side rails so the reach in front of the face is readable.
             Vector3 right = transform.right * outerRadius;
             Vector3 up = transform.up * outerRadius;
-            Handles.DrawLine(p + fwd * axialReach + right, p - fwd * axialReach + right);
-            Handles.DrawLine(p + fwd * axialReach - right, p - fwd * axialReach - right);
-            Handles.DrawLine(p + fwd * axialReach + up, p - fwd * axialReach + up);
-            Handles.DrawLine(p + fwd * axialReach - up, p - fwd * axialReach - up);
+            Handles.DrawLine(p + right, p + fwd * axialReach + right);
+            Handles.DrawLine(p - right, p + fwd * axialReach - right);
+            Handles.DrawLine(p + up, p + fwd * axialReach + up);
+            Handles.DrawLine(p - up, p + fwd * axialReach - up);
 #endif
         }
 

@@ -285,10 +285,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c23196d1e3c9a0b47858bd68bcb77e2b, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DentSource
-  shape: 0
+  shape: 1
   innerRadius: 0.25
   outerRadius: 0.5
-  axialReach: 0.15
+  axialReach: 0.82
   intensity: 1
 --- !u!4 &99469746
 Transform:
@@ -299,7 +299,7 @@ Transform:
   m_GameObject: {fileID: 99469744}
   serializedVersion: 2
   m_LocalRotation: {x: 0.1622934, y: 0.68998057, z: -0.094718635, w: 0.69901085}
-  m_LocalPosition: {x: -1.431, y: 2.481, z: 0.248}
+  m_LocalPosition: {x: -1.255, y: 2.414, z: 0.247}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []

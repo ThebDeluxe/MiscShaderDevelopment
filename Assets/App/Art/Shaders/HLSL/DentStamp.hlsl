@@ -33,15 +33,20 @@ float DentFalloff_Sphere(float3 toPoint, float inner, float outer)
 }
 
 // Flat-bottomed, round-edged: like pressing the end of a cylinder into clay.
-// 'radial' controls the round profile, 'axial' limits how deep along the axis it reaches.
+// The flat face sits AT the source's origin and presses forward along +Z, so the
+// dent starts at the face and fades out 'reach' units in front of it. Nothing
+// behind the face is affected.
 float DentFalloff_Flat(float3 toPoint, float3 axis, float inner, float outer, float reach)
 {
-    float  axial   = dot(toPoint, axis);        // distance along the axis
+    float  axial   = dot(toPoint, axis);        // distance in front of the face
     float3 radialV = toPoint - axial * axis;    // component across the axis
     float  radial  = length(radialV);
 
     float radialFalloff = 1.0 - smoothstep(inner, outer, radial);
-    float axialFalloff  = 1.0 - smoothstep(0.0, max(reach, 1e-4), abs(axial));
+    float axialFalloff  = 1.0 - smoothstep(0.0, max(reach, 1e-4), axial);
+
+    // Kill everything behind the flat face.
+    axialFalloff *= step(0.0, axial);
 
     return radialFalloff * axialFalloff;
 }

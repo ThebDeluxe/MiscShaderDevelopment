@@ -34,6 +34,17 @@ public class DentManager : MonoBehaviour
     [Header("Output")]
     public string globalTextureName = "_CustomRT_Dents";
 
+    [Header("Island Rigidity")]
+    [Tooltip("How much disconnected mesh parts move as a rigid block instead of being\n" +
+             "pressed per-vertex. 1 keeps a part's shape and its offset from whatever it\n" +
+             "sits on; 0 is the old per-vertex behaviour.")]
+    [Range(0f, 1f)] public float islandRigidity = 1f;
+
+    [Tooltip("Islands bigger than this (local-space radius) are always pressed per-vertex.\n" +
+             "Keeps the main body deforming properly while small detail parts stay rigid.\n" +
+             "Check the generator's console log for your mesh's island count.")]
+    public float maxRigidIslandRadius = 0.25f;
+
     [Header("Debug")]
     [Tooltip("Push EVERY vertex along object-space up, ignoring dent sources.\n" +
              "If the mapping is correct the whole mesh should displace uniformly.\n" +
@@ -46,24 +57,32 @@ public class DentManager : MonoBehaviour
     public bool flipYValue = true;
 
     const int MAX_DENTS = 32;
+    const int MAX_ISLANDS = 32;   // must match ISLAND_MAX in DentStamp.hlsl
 
     static readonly int DentPosID       = Shader.PropertyToID("_DentPos");
     static readonly int DentAxisID      = Shader.PropertyToID("_DentAxis");
+    static readonly int DentRightID     = Shader.PropertyToID("_DentRight");
     static readonly int DentParamsID    = Shader.PropertyToID("_DentParams");
     static readonly int DentCountID     = Shader.PropertyToID("_DentCount");
     static readonly int PrevTexID       = Shader.PropertyToID("_PrevDentMap");
     static readonly int DecayID         = Shader.PropertyToID("_Decay");
     static readonly int FlipYID         = Shader.PropertyToID("_FlipY");
     static readonly int DebugStampAllID = Shader.PropertyToID("_DebugStampAll");
+    static readonly int IslandPushID    = Shader.PropertyToID("_IslandPush");
+    static readonly int IslandCountID   = Shader.PropertyToID("_IslandCount");
 
     static readonly List<DentSource> sources = new List<DentSource>();
 
-    // xyz = world position,  w = shape id (0 sphere, 1 cylinder)
+    // xyz = world position of contact point, w = shape id (0 capsule, 1 cylinder, 2 square)
     readonly Vector4[] dentPos    = new Vector4[MAX_DENTS];
-    // xyz = world push axis, w = axial reach
+    // xyz = world press axis (+Z),          w = depth (max penetration)
     readonly Vector4[] dentAxis   = new Vector4[MAX_DENTS];
-    // x = inner radius, y = outer radius, z = intensity, w = unused
+    // xyz = world right (+X, orients Square), w = flatten scale
+    readonly Vector4[] dentRight  = new Vector4[MAX_DENTS];
+    // x = inner radius, y = outer radius, z = strength, w = unused
     readonly Vector4[] dentParams = new Vector4[MAX_DENTS];
+    // xyz = OBJECT space rigid push for this island, w = rigidity 0..1
+    readonly Vector4[] islandPush = new Vector4[MAX_ISLANDS];
 
     DentVertexUVGenerator generator;
     RenderTexture rtA, rtB;
@@ -187,13 +206,17 @@ public class DentManager : MonoBehaviour
         RenderTexture dst = aIsCurrent ? rtB : rtA;
 
         BuildDentArrays();
+        BuildIslandArray();
 
         bool flipY = overrideFlipY ? flipYValue : SystemInfo.graphicsUVStartsAtTop;
 
         stampMaterial.SetVectorArray(DentPosID, dentPos);
         stampMaterial.SetVectorArray(DentAxisID, dentAxis);
+        stampMaterial.SetVectorArray(DentRightID, dentRight);
         stampMaterial.SetVectorArray(DentParamsID, dentParams);
         stampMaterial.SetInt(DentCountID, ActiveDentCount);
+        stampMaterial.SetVectorArray(IslandPushID, islandPush);
+        stampMaterial.SetInt(IslandCountID, Mathf.Min(generator.IslandCount, MAX_ISLANDS));
         stampMaterial.SetTexture(PrevTexID, src);
         stampMaterial.SetFloat(DecayID, Mathf.Pow(1f - decayPerSecond, Time.deltaTime));
         stampMaterial.SetFloat(FlipYID, flipY ? 1f : 0f);
@@ -220,19 +243,114 @@ public class DentManager : MonoBehaviour
         {
             var s = sources[i];
             Vector3 p = s.transform.position;
-            Vector3 axis = s.transform.forward; // +Z is the push direction
+            Vector3 axis = s.transform.forward;  // +Z is the press direction
+            Vector3 right = s.transform.right;   // orients the Square cross-section
 
             dentPos[i]    = new Vector4(p.x, p.y, p.z, (float)s.shape);
-            dentAxis[i]   = new Vector4(axis.x, axis.y, axis.z, Mathf.Max(s.axialReach, 0.0001f));
-            dentParams[i] = new Vector4(s.SafeInnerRadius, s.SafeOuterRadius, s.intensity, 0f);
+            dentAxis[i]   = new Vector4(axis.x, axis.y, axis.z, Mathf.Max(s.depth, 0.0001f));
+            dentRight[i]  = new Vector4(right.x, right.y, right.z, Mathf.Clamp01(s.flattenScale));
+            dentParams[i] = new Vector4(s.SafeInnerRadius, s.SafeOuterRadius, s.strength, 0f);
         }
 
         for (int i = count; i < MAX_DENTS; i++)
         {
             dentPos[i]    = Vector4.zero;
             dentAxis[i]   = Vector4.zero;
+            dentRight[i]  = Vector4.zero;
             dentParams[i] = Vector4.zero;
         }
+    }
+
+    /// <summary>
+    /// Evaluates the press once per mesh island, at its centroid, so the stamp shader
+    /// can move whole disconnected parts rigidly. Islands are few (tens), so doing this
+    /// on the CPU costs nothing.
+    /// </summary>
+    void BuildIslandArray()
+    {
+        int count = Mathf.Min(generator.IslandCount, MAX_ISLANDS);
+        Transform t = targetRenderer.transform;
+
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 centroidWS = t.TransformPoint(generator.IslandCentroids[i]);
+            Vector3 pushWS = EvaluateDentWorld(centroidWS);
+            Vector3 pushOS = t.InverseTransformDirection(pushWS);
+
+            // Big islands (the body) keep per-vertex pressing; small detail parts go rigid.
+            float rigidity = generator.IslandRadii[i] <= maxRigidIslandRadius ? islandRigidity : 0f;
+
+            islandPush[i] = new Vector4(pushOS.x, pushOS.y, pushOS.z, rigidity);
+        }
+
+        for (int i = count; i < MAX_ISLANDS; i++)
+            islandPush[i] = Vector4.zero;
+    }
+
+    // --------------------------------------------------------------------
+    // CPU mirror of the press maths in DentStamp.hlsl.
+    // Keep these two in step: if the shape logic changes there, change it here.
+    // --------------------------------------------------------------------
+
+    Vector3 EvaluateDentWorld(Vector3 worldPos)
+    {
+        Vector3 bestDisp = Vector3.zero;
+        float bestMagSq = 0f;
+
+        int count = ActiveDentCount;
+        for (int i = 0; i < count; i++)
+        {
+            var s = sources[i];
+            Vector3 axis = s.transform.forward;
+            Vector3 right = s.transform.right;
+            Vector3 toPoint = worldPos - s.transform.position;
+
+            float inner = s.SafeInnerRadius;
+            float outer = s.SafeOuterRadius;
+            float axial = Vector3.Dot(toPoint, axis);
+
+            // Square uses a Chebyshev cross-section; the other two are round.
+            float lat;
+            if (s.shape == DentShape.Square)
+            {
+                Vector3 up = Vector3.Cross(axis, right);
+                lat = Mathf.Max(Mathf.Abs(Vector3.Dot(toPoint, right)),
+                                Mathf.Abs(Vector3.Dot(toPoint, up)));
+            }
+            else
+            {
+                lat = Vector3.ProjectOnPlane(toPoint, axis).magnitude;
+            }
+
+            // Capsule is simply the punch with no flat face at all.
+            float innerEff = s.shape == DentShape.Capsule ? 0f : inner;
+
+            float surfaceAxial = DentSurfaceAxial(lat, innerEff, outer);
+
+            float penetration = Mathf.Clamp(surfaceAxial - axial, 0f, Mathf.Max(s.depth, 0.0001f));
+            float push = penetration * (1f - Mathf.Clamp01(s.flattenScale)) * s.strength;
+
+            Vector3 disp = axis * push;
+            float magSq = disp.sqrMagnitude;
+            if (magSq > bestMagSq)
+            {
+                bestMagSq = magSq;
+                bestDisp = disp;
+            }
+        }
+
+        return bestDisp;
+    }
+
+    /// <summary>Mirror of DentSurfaceAxial in DentStamp.hlsl.</summary>
+    static float DentSurfaceAxial(float lat, float inner, float outer)
+    {
+        if (lat >= outer) return -1e9f;
+        if (lat <= inner) return 0f;
+
+        float r = Mathf.Max(outer - inner, 1e-5f);
+        float d = lat - inner;
+        return -(r - Mathf.Sqrt(Mathf.Max(r * r - d * d, 0f)));
     }
 
     void Release()

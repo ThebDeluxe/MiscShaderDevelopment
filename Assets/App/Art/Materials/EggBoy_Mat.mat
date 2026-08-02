@@ -154,7 +154,7 @@ Material:
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
-    - _Max_Dent_Depth: 0.2
+    - _Max_Dent_Depth: 1
     - _Metallic: 0
     - _Noise_Tiling: 1
     - _OcclusionStrength: 1

@@ -44,9 +44,10 @@ Shader "Custom/DentStampRaw"
             struct Attributes
             {
                 float3 positionOS : POSITION;
-                // Index-mapping UV from DentVertexUVGenerator.
-                // TEXCOORD2 == Mesh.uv3 == Shader Graph "UV2".
-                float2 indexUV    : TEXCOORD2;
+                // Index mapping from DentVertexUVGenerator.
+                // xy = this vertex's texel centre, z = island id.
+                // TEXCOORD2 == Shader Graph "UV2".
+                float3 indexUV    : TEXCOORD2;
             };
 
             struct Varyings
@@ -54,6 +55,7 @@ Shader "Custom/DentStampRaw"
                 float4 positionCS : SV_POSITION;
                 float2 uv         : TEXCOORD0;
                 float3 worldPos   : TEXCOORD1;
+                float  islandId   : TEXCOORD2;
                 float  pointSize  : PSIZE;   // ignored on D3D, drives gl_PointSize on GL/WebGL
             };
 
@@ -65,11 +67,12 @@ Shader "Custom/DentStampRaw"
 
                 // Rasterise straight into texel space: no MVP transform, so this is
                 // completely camera independent.
-                float2 ndc = IN.indexUV * 2.0 - 1.0;
+                float2 ndc = IN.indexUV.xy * 2.0 - 1.0;
                 ndc.y = lerp(ndc.y, -ndc.y, saturate(_FlipY));
                 OUT.positionCS = float4(ndc, 0.0, 1.0);
 
-                OUT.uv = IN.indexUV;
+                OUT.uv = IN.indexUV.xy;
+                OUT.islandId = IN.indexUV.z;
                 OUT.pointSize = 1.0;
                 return OUT;
             }
@@ -77,7 +80,7 @@ Shader "Custom/DentStampRaw"
             float4 frag(Varyings IN) : SV_Target
             {
                 float3 disp;
-                CalculateDentVector_float(IN.worldPos, disp);
+                CalculateDentVector_float(IN.worldPos, IN.islandId, disp);
 
                 // Debug override: push everything along object-space up.
                 if (_DebugStampAll > 0.5)

@@ -97,7 +97,7 @@ Material:
     - _Cull: 2
     - _Cutoff: 0.5
     - _DebugStampAll: 0
-    - _Decay: 0.9988215
+    - _Decay: 0.99509436
     - _DentCount: 1
     - _DetailAlbedoMapScale: 1
     - _DetailNormalMapScale: 1

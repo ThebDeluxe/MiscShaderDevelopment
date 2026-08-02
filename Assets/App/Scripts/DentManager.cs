@@ -40,10 +40,17 @@ public class DentManager : MonoBehaviour
              "sits on; 0 is the old per-vertex behaviour.")]
     [Range(0f, 1f)] public float islandRigidity = 1f;
 
-    [Tooltip("Islands bigger than this (local-space radius) are always pressed per-vertex.\n" +
-             "Keeps the main body deforming properly while small detail parts stay rigid.\n" +
-             "Check the generator's console log for your mesh's island count.")]
-    public float maxRigidIslandRadius = 0.25f;
+    [Tooltip("Islands with a local-space radius at or below this are FULLY rigid: the whole " +
+             "piece translates by one push value and does not bend at all.\n" +
+             "Meant for small detail parts that should keep their shape and their offset " +
+             "from whatever they sit on.")]
+    public float rigidBelowRadius = 0.1f;
+
+    [Tooltip("Islands at or above this local-space radius are pressed fully per-vertex, so " +
+             "they bend to the stamp.\n" +
+             "Between the two radii rigidity ramps smoothly, which avoids a hard population " +
+             "split where some pieces bend and others move as a solid block.")]
+    public float flexibleAboveRadius = 0.35f;
 
     [Header("Debug")]
     [Tooltip("Push EVERY vertex along object-space up, ignoring dent sources.\n" +
@@ -262,23 +269,46 @@ public class DentManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Evaluates the press once per mesh island, at its centroid, so the stamp shader
-    /// can move whole disconnected parts rigidly. Islands are few (tens), so doing this
-    /// on the CPU costs nothing.
+    /// Evaluates the press once per mesh island so the stamp shader can move whole
+    /// disconnected parts rigidly.
+    ///
+    /// Each island is sampled at several points and the STRONGEST push wins. A single
+    /// centroid is not enough: on a toroid the centroid sits in the hole, outside the
+    /// mesh, and would report no penetration while the ring itself is fully pressed.
     /// </summary>
     void BuildIslandArray()
     {
         int count = Mathf.Min(generator.IslandCount, MAX_ISLANDS);
-        Transform t = targetRenderer.transform;
+        Transform tr = targetRenderer.transform;
 
         for (int i = 0; i < count; i++)
         {
-            Vector3 centroidWS = t.TransformPoint(generator.IslandCentroids[i]);
-            Vector3 pushWS = EvaluateDentWorld(centroidWS);
-            Vector3 pushOS = t.InverseTransformDirection(pushWS);
+            Vector3[] samples = generator.IslandSamples[i];
 
-            // Big islands (the body) keep per-vertex pressing; small detail parts go rigid.
-            float rigidity = generator.IslandRadii[i] <= maxRigidIslandRadius ? islandRigidity : 0f;
+            Vector3 bestPushWS = Vector3.zero;
+            float bestMagSq = 0f;
+
+            for (int s = 0; s < samples.Length; s++)
+            {
+                Vector3 pushWS = EvaluateDentWorld(tr.TransformPoint(samples[s]));
+                float magSq = pushWS.sqrMagnitude;
+                if (magSq > bestMagSq)
+                {
+                    bestMagSq = magSq;
+                    bestPushWS = pushWS;
+                }
+            }
+
+            Vector3 pushOS = tr.InverseTransformDirection(bestPushWS);
+
+            // Rigidity ramps with island size: small detail parts move as a block, large
+            // ones bend to the stamp, and everything between blends rather than snapping
+            // from one behaviour to the other.
+            float radius = generator.IslandRadii[i];
+            float sizeT = Mathf.InverseLerp(rigidBelowRadius,
+                                            Mathf.Max(flexibleAboveRadius, rigidBelowRadius + 1e-4f),
+                                            radius);
+            float rigidity = islandRigidity * (1f - Mathf.SmoothStep(0f, 1f, sizeT));
 
             islandPush[i] = new Vector4(pushOS.x, pushOS.y, pushOS.z, rigidity);
         }
@@ -352,6 +382,33 @@ public class DentManager : MonoBehaviour
         float d = lat - inner;
         return -(r - Mathf.Sqrt(Mathf.Max(r * r - d * d, 0f)));
     }
+
+    /// <summary>
+    /// Displacement for a point on the mesh, in OBJECT space, matching what the stamp
+    /// shader computes for a vertex - including the island rigidity blend.
+    ///
+    /// Used by DentColliderRig so physics and visuals agree. Note this reflects the
+    /// CURRENT stamps only: the accumulated/decayed history lives in the dent texture,
+    /// which the CPU has no view of. Callers that need history must accumulate it
+    /// themselves using the same max-with-decay rule.
+    /// </summary>
+    public Vector3 EvaluateDisplacementOS(Vector3 localPos, int islandId)
+    {
+        if (targetRenderer == null) return Vector3.zero;
+
+        Transform tr = targetRenderer.transform;
+        Vector3 perVertexOS = tr.InverseTransformDirection(EvaluateDentWorld(tr.TransformPoint(localPos)));
+
+        if (islandId < 0 || islandId >= MAX_ISLANDS) return perVertexOS;
+
+        Vector4 island = islandPush[islandId];
+        return Vector3.Lerp(perVertexOS,
+                            new Vector3(island.x, island.y, island.z),
+                            Mathf.Clamp01(island.w));
+    }
+
+    /// <summary>Same decay factor the stamp shader uses this frame.</summary>
+    public float CurrentDecay => Mathf.Pow(1f - decayPerSecond, Time.deltaTime);
 
     void Release()
     {

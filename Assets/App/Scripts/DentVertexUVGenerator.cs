@@ -36,6 +36,11 @@ public class DentVertexUVGenerator : MonoBehaviour
              "edges, which would otherwise look like separate islands.")]
     public float weldEpsilon = 0.0001f;
 
+    [Tooltip("How many points per island DentManager tests when working out that island's\n" +
+             "rigid push. More is more accurate on awkward shapes, but costs a little CPU\n" +
+             "each frame. A single centroid is not enough: on a toroid it lands in the hole.")]
+    [Range(1, 128)] public int samplesPerIsland = 32;
+
     public int TextureSize { get; private set; }
     public int VertexCount { get; private set; }
     public bool IsGenerated { get; private set; }
@@ -43,10 +48,12 @@ public class DentVertexUVGenerator : MonoBehaviour
 
     /// <summary>Number of connected components found.</summary>
     public int IslandCount { get; private set; }
-    /// <summary>Centroid of each island, in LOCAL space.</summary>
+    /// <summary>Centroid of each island, in LOCAL space. Used only as a size reference.</summary>
     public Vector3[] IslandCentroids { get; private set; }
     /// <summary>Distance from each island's centroid to its furthest vertex, in LOCAL space.</summary>
     public float[] IslandRadii { get; private set; }
+    /// <summary>Sample points on each island, in LOCAL space, used to evaluate its rigid push.</summary>
+    public Vector3[][] IslandSamples { get; private set; }
 
     Mesh instancedMesh;
 
@@ -105,93 +112,51 @@ public class DentVertexUVGenerator : MonoBehaviour
 
     int[] BuildIslands(Mesh mesh, Vector3[] verts)
     {
-        // Weld coincident vertices first. Unity splits verts at UV seams and hard
-        // edges, so raw index connectivity would report far too many islands.
-        int[] weld = new int[VertexCount];
-        var lookup = new Dictionary<Vector3Int, int>(VertexCount);
-        float inv = 1f / Mathf.Max(weldEpsilon, 1e-6f);
+        int[] islandOf = DentMeshIslands.Build(mesh, verts, weldEpsilon, out int count);
+        IslandCount = count;
 
-        for (int i = 0; i < VertexCount; i++)
-        {
-            var key = new Vector3Int(
-                Mathf.RoundToInt(verts[i].x * inv),
-                Mathf.RoundToInt(verts[i].y * inv),
-                Mathf.RoundToInt(verts[i].z * inv));
-
-            if (lookup.TryGetValue(key, out int rep)) weld[i] = rep;
-            else { lookup[key] = i; weld[i] = i; }
-        }
-
-        // Union-find over triangles.
-        int[] parent = new int[VertexCount];
-        for (int i = 0; i < VertexCount; i++) parent[i] = i;
-
-        int[] tris = mesh.triangles;
-        for (int t = 0; t < tris.Length; t += 3)
-        {
-            int a = weld[tris[t]];
-            int b = weld[tris[t + 1]];
-            int c = weld[tris[t + 2]];
-            Union(parent, a, b);
-            Union(parent, b, c);
-        }
-
-        // Compact roots into 0..n-1 island ids.
-        var idOfRoot = new Dictionary<int, int>();
-        int[] islandOf = new int[VertexCount];
-
-        for (int i = 0; i < VertexCount; i++)
-        {
-            int root = Find(parent, weld[i]);
-            if (!idOfRoot.TryGetValue(root, out int id))
-            {
-                id = idOfRoot.Count;
-                idOfRoot[root] = id;
-            }
-            islandOf[i] = id;
-        }
-
-        IslandCount = idOfRoot.Count;
-
-        // Centroid and radius per island, in local space.
-        var sums = new Vector3[IslandCount];
-        var counts = new int[IslandCount];
-        for (int i = 0; i < VertexCount; i++)
-        {
-            sums[islandOf[i]] += verts[i];
-            counts[islandOf[i]]++;
-        }
+        var members = DentMeshIslands.GroupByIsland(islandOf, IslandCount);
 
         IslandCentroids = new Vector3[IslandCount];
         IslandRadii = new float[IslandCount];
-        for (int i = 0; i < IslandCount; i++)
-            IslandCentroids[i] = counts[i] > 0 ? sums[i] / counts[i] : Vector3.zero;
+        IslandSamples = new Vector3[IslandCount][];
 
-        for (int i = 0; i < VertexCount; i++)
+        int wanted = Mathf.Max(1, samplesPerIsland);
+
+        for (int i = 0; i < IslandCount; i++)
         {
-            int id = islandOf[i];
-            float d = Vector3.Distance(verts[i], IslandCentroids[id]);
-            if (d > IslandRadii[id]) IslandRadii[id] = d;
+            var list = members[i];
+            if (list.Count == 0)
+            {
+                IslandSamples[i] = new Vector3[0];
+                continue;
+            }
+
+            Vector3 sum = Vector3.zero;
+            for (int k = 0; k < list.Count; k++) sum += verts[list[k]];
+            IslandCentroids[i] = sum / list.Count;
+
+            float maxDist = 0f;
+            for (int k = 0; k < list.Count; k++)
+            {
+                float d = Vector3.Distance(verts[list[k]], IslandCentroids[i]);
+                if (d > maxDist) maxDist = d;
+            }
+            IslandRadii[i] = maxDist;
+
+            // Evenly strided subset, so samples are spread over the whole island rather
+            // than clustered wherever the vertex order happens to start.
+            int take = Mathf.Min(wanted, list.Count);
+            var samples = new Vector3[take];
+            for (int k = 0; k < take; k++)
+            {
+                int index = Mathf.FloorToInt((float)k / take * list.Count);
+                samples[k] = verts[list[Mathf.Clamp(index, 0, list.Count - 1)]];
+            }
+            IslandSamples[i] = samples;
         }
 
         return islandOf;
-    }
-
-    static int Find(int[] parent, int i)
-    {
-        while (parent[i] != i)
-        {
-            parent[i] = parent[parent[i]];   // path halving
-            i = parent[i];
-        }
-        return i;
-    }
-
-    static void Union(int[] parent, int a, int b)
-    {
-        a = Find(parent, a);
-        b = Find(parent, b);
-        if (a != b) parent[b] = a;
     }
 
     // --------------------------------------------------------------------

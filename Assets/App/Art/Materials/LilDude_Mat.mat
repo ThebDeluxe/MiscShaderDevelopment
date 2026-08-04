@@ -43,6 +43,7 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
+    - _Fresnel_Amount: 0.15
     - _Use_Vertex_Colour: 1
     m_Colors: []
   m_BuildTextureStacks: []

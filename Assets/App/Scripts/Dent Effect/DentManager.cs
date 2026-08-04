@@ -35,12 +35,6 @@ public class DentManager : MonoBehaviour
              "RGBA8 cannot store negative direction components.")]
     public RenderTextureFormat format = RenderTextureFormat.ARGBHalf;
 
-    [Header("Output")]
-    [Tooltip("Texture property on the CHARACTER material that receives the dent map.\n" +
-             "This must be a Per Material scope property in the shader graph - a Global " +
-             "scope one cannot be set per object.")]
-    public string dentTextureProperty = "_CustomRT_Dents";
-
     [Header("Decay")]
     [Tooltip("Fraction of the dent magnitude lost per second. 0 = dents are permanent.")]
     [Range(0f, 1f)] public float decayPerSecond = 0.15f;
@@ -87,6 +81,13 @@ public class DentManager : MonoBehaviour
     const int MAX_DENTS = 16;     // must match DENT_MAX in DentStamp.hlsl
     const int MAX_ISLANDS = 32;   // must match ISLAND_MAX in DentStamp.hlsl
 
+    /// <summary>
+    /// Texture property on the character material that receives the dent map. Must be a
+    /// Per Material scope property in the shader graph - a Global scope one cannot be set
+    /// per object, so several dented characters would overwrite each other.
+    /// </summary>
+    const string DentTextureProperty = "_CustomRT_Dents";
+
     static readonly int DentPosID       = Shader.PropertyToID("_DentPos");
     static readonly int DentAxisID      = Shader.PropertyToID("_DentAxis");
     static readonly int DentRightID     = Shader.PropertyToID("_DentRight");
@@ -101,6 +102,7 @@ public class DentManager : MonoBehaviour
     static readonly int DebugStampAllID = Shader.PropertyToID("_DebugStampAll");
     static readonly int IslandPushID    = Shader.PropertyToID("_IslandPush");
     static readonly int IslandCountID   = Shader.PropertyToID("_IslandCount");
+    static readonly int DentTextureID   = Shader.PropertyToID(DentTextureProperty);
 
     /// <summary>Every enabled source in the scene. Each manager filters this down itself.</summary>
     static readonly List<DentSource> allSources = new List<DentSource>();
@@ -128,7 +130,6 @@ public class DentManager : MonoBehaviour
     DentVertexUVGenerator generator;
     Material stampInstance;      // our own copy, so managers never fight over uniforms
     Material characterMaterial;  // renderer's instance, receives the dent map
-    int dentTextureID;
     RenderTexture rtA, rtB;
     bool aIsCurrent;
     CommandBuffer cmd;
@@ -199,12 +200,11 @@ public class DentManager : MonoBehaviour
         // Renderer's own material instance. Instances keep SRP Batcher compatibility,
         // unlike MaterialPropertyBlock overrides.
         characterMaterial = targetRenderer.material;
-        dentTextureID = Shader.PropertyToID(dentTextureProperty);
 
-        if (!characterMaterial.HasProperty(dentTextureID))
+        if (!characterMaterial.HasProperty(DentTextureID))
         {
             Debug.LogError($"{name}: material '{characterMaterial.name}' has no texture property " +
-                           $"'{dentTextureProperty}'. In the shader graph, set that property's Scope " +
+                           $"'{DentTextureProperty}'. In the shader graph, set that property's Scope " +
                            "to 'Per Material' - a Global scope property cannot be set per object.", this);
             enabled = false;
             return false;
@@ -294,7 +294,7 @@ public class DentManager : MonoBehaviour
 
         aIsCurrent = !aIsCurrent;
 
-        characterMaterial.SetTexture(dentTextureID, dst);
+        characterMaterial.SetTexture(DentTextureID, dst);
     }
 
     /// <summary>
@@ -654,8 +654,8 @@ public class DentManager : MonoBehaviour
     {
         // Leave the character material on a known-zero texture, otherwise it keeps
         // sampling a released buffer and appears fully deformed after exiting play mode.
-        if (characterMaterial != null && characterMaterial.HasProperty(dentTextureID))
-            characterMaterial.SetTexture(dentTextureID, Texture2D.blackTexture);
+        if (characterMaterial != null && characterMaterial.HasProperty(DentTextureID))
+            characterMaterial.SetTexture(DentTextureID, Texture2D.blackTexture);
 
         DestroyRT(ref rtA);
         DestroyRT(ref rtB);

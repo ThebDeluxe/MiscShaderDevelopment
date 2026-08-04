@@ -1912,7 +1912,6 @@ MonoBehaviour:
   targetRenderer: {fileID: 531405049}
   stampMaterial: {fileID: 2100000, guid: 6593a7ea94a518844b433590a9867d20, type: 2}
   format: 2
-  dentTextureProperty: _CustomRT_Dents
   decayPerSecond: 0.5
   decayDepthBias: 0
   filterSourcesByBounds: 1
@@ -2032,7 +2031,6 @@ MonoBehaviour:
   targetRenderer: {fileID: 390280722}
   stampMaterial: {fileID: 2100000, guid: 6593a7ea94a518844b433590a9867d20, type: 2}
   format: 2
-  dentTextureProperty: _CustomRT_Dents
   decayPerSecond: 0.9
   decayDepthBias: 2
   filterSourcesByBounds: 1
@@ -2120,6 +2118,8 @@ GameObject:
   m_Component:
   - component: {fileID: 2123941573}
   - component: {fileID: 2123941574}
+  - component: {fileID: 2123941575}
+  - component: {fileID: 2123941576}
   m_Layer: 0
   m_Name: Transform
   m_TagString: Untagged
@@ -2156,6 +2156,43 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ChaosTheoryGames.Utils.Spin
   rotationsPerSecond: {x: 0.5, y: 0, z: 0}
+--- !u!114 &2123941575
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2123941572}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 28e2cfd7dcfe26448a7a879a1fdd4ed3, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ParabolaAnimation
+  axis: 1
+  peakHeight: 2
+  arcDuration: 0.5
+  delayBetweenArcs: 1
+--- !u!114 &2123941576
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2123941572}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9038d24a1c35873418630f71753a5d3c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SquashStretch
+  targetRenderer: {fileID: 390280722}
+  motionSource: {fileID: 390280721}
+  velocityToStretch: 0.15
+  maxStretch: 0.5
+  speedDeadzone: 0.05
+  stiffness: 400
+  damping: 6
+  pivotLocal: {x: 0, y: 0, z: 0}
+  drawGizmos: 1
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

@@ -11,45 +11,77 @@
 // touches the source's origin. Vertices on the approach side of that surface (behind
 // it, up to 'depth') are inside the stamp and get scaled forward onto it.
 //
-// All three shapes share ONE press function and ONE contact surface function. They
+// All four shapes share ONE press function and ONE contact surface function. They
 // differ only in cross-section (round vs square) and whether they have a flat face:
 //   Cylinder / Square : flat out to 'inner', then a rounded rim out to 'outer'
 //   Capsule           : the same punch with inner = 0, i.e. a hemisphere
+//   Plane             : flat right to its edge, no rim
 //
 // ISLAND RIGIDITY
 // Per-vertex pressing crushes the relief of separate shells: a decoration sitting
 // proud of a body gets scaled toward the same contact plane, so it sinks into it.
-// To avoid that, DentManager evaluates the press once per mesh island (on the CPU,
-// at the island's centroid) and uploads the result. The shader then blends between
-// the per-vertex press and that single rigid push. At rigidity 1 an island keeps its
-// shape and its offset exactly; it just translates into the dent.
+// To avoid that, DentManager evaluates the press once per mesh island (on the CPU)
+// and uploads the result. The shader blends between the per-vertex press and that
+// single rigid push.
 //
 // Data layout (filled by DentManager):
 //   _DentPos[i]    : xyz = world position of the contact point, w = shape id
 //   _DentAxis[i]   : xyz = world press axis (+Z),               w = depth
 //   _DentRight[i]  : xyz = world right (+X, orients Square),    w = flatten scale
 //   _DentParams[i] : x = inner radius, y = outer radius, z = strength, w = spread amount
+//   _DentBulge[i]  : x = rim bulge amount, y = bulge reach, z = normal bias,
+//                    w = bulge driver (deepest penetration, already clamped by the CPU)
+//   _DentDecay[i]  : x = decay multiplier for dents this stamp creates
 //   _IslandPush[j] : xyz = OBJECT space rigid push for island j, w = rigidity 0..1
 //
-// Shape ids: 0 = Capsule, 1 = Cylinder, 2 = Square.
-
+// Shape ids: 0 = Capsule, 1 = Cylinder, 2 = Square, 3 = Plane.
+//
+// PLANE is not a punch. It is a hard surface the object RESTS ON, so displaced material
+// cannot pile up behind it - there is no behind. Everything below the plane conforms to
+// it, and the volume has nowhere to go but sideways, splaying outward just above the
+// contact. That splay is driven by the bulge driver, which the CPU measures across the
+// whole mesh, because no single vertex can know how squashed the object is.
+//
+// BULGE DRIVER
+// Bulge strength scales with how far the stamp is pressed in. That is measured on the
+// CPU as the deepest penetration anywhere on the mesh, then CLAMPED per source - without
+// the clamp a single long protrusion dipping deep would inflate the bulge everywhere.
+//
 // PERPENDICULAR SPREAD
-// Material pushed out of the way has to go somewhere, so it bulges sideways around the
-// contact. The sideways amount is proportional to how much was pushed in, and its radial
-// profile peaks near the inner radius: nothing at the very centre (nothing to spread),
-// nothing past the outer radius.
+// Material pushed out of the way has to go somewhere. Two separate effects:
+//
+//  - Spread  : inside the contact, vertices slide sideways away from the axis.
+//              Peaks around the inner radius, driven by how much was pushed in.
+//
+//  - Rim bulge : material displaced by a PUNCH piles up around the contact. The band is
+//              centred on the contact plane and straddles it. It moves along -Z by
+//              default; the vertex normal is tempting but wrong on its own, since on the
+//              side of a ball it points sideways and below the equator it points
+//              downward. Blend some in with _DentBulge[i].z to follow the surface.
+//
+//  - Plane splay : a PLANE has no behind, so its displaced volume goes sideways instead.
+//
+// DECAY
+// The map's ALPHA channel carries the decay multiplier of whichever stamp wrote that
+// texel, because the vector alone says nothing about where it came from. Decay is
+// otherwise proportional - prev * decay^t - which means a deep dent and a shallow one
+// shrink by the same fraction, so the deep one stays visible far longer. _DecayDepthBias
+// adds a magnitude-dependent term so deeper dents fade faster and the two even out.
 
-#define DENT_MAX   32
+#define DENT_MAX   16
 #define ISLAND_MAX 32
 
 #define DENT_SHAPE_CAPSULE  0
 #define DENT_SHAPE_CYLINDER 1
 #define DENT_SHAPE_SQUARE   2
+#define DENT_SHAPE_PLANE    3
 
 float4 _DentPos[DENT_MAX];
 float4 _DentAxis[DENT_MAX];
 float4 _DentRight[DENT_MAX];
 float4 _DentParams[DENT_MAX];
+float4 _DentBulge[DENT_MAX];
+float4 _DentDecay[DENT_MAX];
 int    _DentCount;
 
 float4 _IslandPush[ISLAND_MAX];
@@ -119,10 +151,13 @@ float DentPress_Axial(float axial, float surfaceAxial, float depth, float flatte
 }
 
 // Strongest press at a world position, as a WORLD space vector.
-float3 EvaluateDentWorld(float3 WorldPos)
+// WorldNormal is the vertex's own surface normal, which the rim bulge can follow.
+// DecayMul comes from whichever stamp won, so the result carries its own fade rate.
+float3 EvaluateDentWorld(float3 WorldPos, float3 WorldNormal, out float DecayMul)
 {
     float3 bestDisp  = float3(0, 0, 0);
     float  bestMagSq = 0.0;
+    DecayMul = 1.0;
 
     for (int i = 0; i < _DentCount; i++)
     {
@@ -137,6 +172,12 @@ float3 EvaluateDentWorld(float3 WorldPos)
         float outer    = _DentParams[i].y;
         float strength = _DentParams[i].z;
         float spread   = _DentParams[i].w;
+        float rimAmt   = _DentBulge[i].x;
+        float rimReach = max(_DentBulge[i].y, 1.0);
+        float rimBias  = saturate(_DentBulge[i].z);
+        float driver   = _DentBulge[i].w;   // already clamped on the CPU
+
+        bool isPlane = (shapeId > 2.5);
 
         float axial = dot(toPoint, axis);
 
@@ -146,26 +187,58 @@ float3 EvaluateDentWorld(float3 WorldPos)
         float  radial  = length(radialV);
         float3 outward = (radial > 1e-5) ? (radialV / radial) : float3(0, 0, 0);
 
-        // Square uses a Chebyshev cross-section; the other two are round.
+        // Square and Plane use a Chebyshev cross-section; the other two are round.
         float lat = (shapeId > 1.5)
             ? DentLateral_Square(toPoint, axis, right)
             : radial;
 
-        // Capsule is simply the punch with no flat face at all.
-        float innerEff = (shapeId < 0.5) ? 0.0 : inner;
+        // Capsule has no flat face; Plane is flat right to its edge. Both mean no inner radius.
+        float innerEff = (shapeId < 0.5 || isPlane) ? 0.0 : inner;
 
-        float surfaceAxial = DentSurfaceAxial(lat, innerEff, outer);
+        // A Plane is flat right to its edge - no rim fillet. 'outer' is its half size.
+        float surfaceAxial = isPlane
+            ? ((lat <= outer) ? 0.0 : -1e9)
+            : DentSurfaceAxial(lat, innerEff, outer);
+
         float push = DentPress_Axial(axial, surfaceAxial, depth, flatten);
 
-        // Radial profile for the spread: rises from the centre, peaks around the inner
-        // radius, falls to nothing at the outer radius. The lower bound on the ramp width
-        // stops a zero inner radius (Capsule) producing a discontinuity at the axis.
+        // --- sideways spread, inside the contact ---
+        // Rises from the centre, peaks around the inner radius, gone by the outer radius.
+        // The lower bound on the ramp width stops a zero inner radius (Capsule) producing
+        // a discontinuity at the axis.
         float peak    = max(innerEff, outer * 0.15);
         float rampIn  = smoothstep(0.0, peak, lat);
         float rampOut = 1.0 - smoothstep(peak, outer, lat);
         float bulge   = push * spread * rampIn * rampOut;
 
-        float3 disp = (axis * push + outward * bulge) * strength;
+        // --- bulge ---
+        float  rim;
+        float3 rimDir;
+
+        if (isPlane)
+        {
+            // Resting on a hard surface: the squashed volume splays OUTWARD, just above
+            // the plane, and never crosses it.
+            float height = max(driver * rimReach, 1e-5);
+            float above  = (axial > 0.0) ? (1.0 - smoothstep(0.0, height, axial)) : 0.0;
+
+            rim    = driver * rimAmt * above;
+            rimDir = outward;
+        }
+        else
+        {
+            // A punch: displaced material piles up around the contact. The band is centred
+            // ON the contact plane rather than sitting behind it, so the pile straddles the
+            // surface instead of forming only on the approach side.
+            float axialProf = 1.0 - smoothstep(0.0, max(driver, 1e-5), abs(axial));
+            float rimIn     = smoothstep(innerEff, outer, lat);
+            float rimOut    = 1.0 - smoothstep(outer, outer * rimReach, lat);
+
+            rim    = driver * rimAmt * rimIn * rimOut * axialProf * (1.0 - flatten);
+            rimDir = normalize(lerp(-axis, WorldNormal, rimBias) + 1e-6);
+        }
+
+        float3 disp = (axis * push + outward * bulge + rimDir * rim) * strength;
 
         // Strongest source wins rather than summing, so overlapping stamps of the
         // same depth read as one dent instead of a doubly deep one.
@@ -174,6 +247,7 @@ float3 EvaluateDentWorld(float3 WorldPos)
         {
             bestMagSq = magSq;
             bestDisp  = disp;
+            DecayMul  = max(_DentDecay[i].x, 0.0);
         }
     }
 
@@ -184,9 +258,11 @@ float3 EvaluateDentWorld(float3 WorldPos)
 // Final displacement for a vertex, in OBJECT space.
 // IslandId comes from the z component of the index UV.
 // --------------------------------------------------------------------
-void CalculateDentVector_float(float3 WorldPos, float IslandId, out float3 Displacement)
+void CalculateDentVector_float(float3 WorldPos, float3 WorldNormal, float IslandId,
+                               out float3 Displacement, out float DecayMul)
 {
-    float3 perVertex = TransformWorldToObjectDir(EvaluateDentWorld(WorldPos), false);
+    float3 perVertex = TransformWorldToObjectDir(
+        EvaluateDentWorld(WorldPos, WorldNormal, DecayMul), false);
 
     int id = clamp((int)round(IslandId), 0, ISLAND_MAX - 1);
     float4 island = (id < _IslandCount) ? _IslandPush[id] : float4(0, 0, 0, 0);

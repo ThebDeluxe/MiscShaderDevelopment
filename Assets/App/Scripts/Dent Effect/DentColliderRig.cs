@@ -95,7 +95,9 @@ public class DentColliderRig : MonoBehaviour
     [SerializeField, HideInInspector] int bakedVertexCount;
 
     Vector3[] restPositions;
+    Vector3[] restNormals;          // needed by the dent evaluation for the rim bulge
     Vector3[] accumulated;          // per stored member, object space, mirrors the texture's history
+    float[] accumulatedDecayMul;    // decay multiplier of whatever last wrote each member
     int[] memberFlatIndex;          // start offset of each binding's members within 'accumulated'
     SphereCollider[] colliders;
     Transform colliderRoot;
@@ -296,6 +298,9 @@ public class DentColliderRig : MonoBehaviour
 
         var mesh = GetComponent<MeshFilter>().sharedMesh;
         restPositions = mesh.vertices;
+        restNormals = mesh.normals;
+        if (restNormals == null || restNormals.Length != restPositions.Length)
+            restNormals = null;
 
         if (restPositions.Length != bakedVertexCount)
         {
@@ -322,6 +327,8 @@ public class DentColliderRig : MonoBehaviour
         memberFlatIndex[bindings.Count] = running;
 
         accumulated = new Vector3[running];
+        accumulatedDecayMul = new float[running];
+        for (int i = 0; i < running; i++) accumulatedDecayMul[i] = 1f;
     }
 
     void CreateColliders()
@@ -348,8 +355,6 @@ public class DentColliderRig : MonoBehaviour
     {
         if (!updateWithDeformation || dentManager == null || colliders == null) return;
 
-        float decay = dentManager.CurrentDecay;
-
         for (int b = 0; b < bindings.Count; b++)
         {
             var bind = bindings[b];
@@ -360,16 +365,25 @@ public class DentColliderRig : MonoBehaviour
 
             for (int m = 0; m < count; m++)
             {
-                Vector3 rest = restPositions[bind.members[m]];
-                Vector3 current = dentManager.EvaluateDisplacementOS(rest, bind.islandId);
+                int vi = bind.members[m];
+                Vector3 rest = restPositions[vi];
+                Vector3 normal = restNormals != null ? restNormals[vi] : Vector3.zero;
+                Vector3 current = dentManager.EvaluateDisplacementOS(rest, normal, bind.islandId,
+                                                                     out float currentDecayMul);
 
                 // Mirror the shader's "strongest wins, decay the rest" rule so the
-                // colliders keep the same history the dent texture does.
-                Vector3 decayed = accumulated[flat + m] * decay;
-                Vector3 result = current.sqrMagnitude > decayed.sqrMagnitude ? current : decayed;
-                accumulated[flat + m] = result;
+                // colliders keep the same history the dent texture does - including the
+                // per-source rate and the depth bias.
+                int slot = flat + m;
+                Vector3 stored = accumulated[slot];
+                float decay = dentManager.DecayFor(accumulatedDecayMul[slot], stored.magnitude);
+                Vector3 decayed = stored * decay;
 
-                memberMean += rest + result;
+                bool newWins = current.sqrMagnitude > decayed.sqrMagnitude;
+                accumulated[slot] = newWins ? current : decayed;
+                if (newWins) accumulatedDecayMul[slot] = currentDecayMul;
+
+                memberMean += rest + accumulated[slot];
             }
 
             memberMean /= count;

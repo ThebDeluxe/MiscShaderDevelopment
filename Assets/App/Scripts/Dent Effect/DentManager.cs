@@ -45,6 +45,13 @@ public class DentManager : MonoBehaviour
     [Tooltip("Fraction of the dent magnitude lost per second. 0 = dents are permanent.")]
     [Range(0f, 1f)] public float decayPerSecond = 0.15f;
 
+    [Tooltip("Extra decay proportional to how deep a dent is.\n\n" +
+             "Plain decay is proportional, so a deep dent and a shallow one shrink by the " +
+             "same fraction each frame and the deep one stays visible far longer. Raise " +
+             "this to make deeper dents fade faster so they even out.\n\n" +
+             "0 = classic proportional decay.")]
+    [Range(0f, 8f)] public float decayDepthBias = 0f;
+
     [Header("Source Filtering")]
     [Tooltip("Only stamp sources whose reach overlaps this renderer's bounds. Keeps several " +
              "dented objects independent, and skips work for distant sources.")]
@@ -77,16 +84,19 @@ public class DentManager : MonoBehaviour
     public bool overrideFlipY = false;
     public bool flipYValue = true;
 
-    const int MAX_DENTS = 32;
+    const int MAX_DENTS = 16;     // must match DENT_MAX in DentStamp.hlsl
     const int MAX_ISLANDS = 32;   // must match ISLAND_MAX in DentStamp.hlsl
 
     static readonly int DentPosID       = Shader.PropertyToID("_DentPos");
     static readonly int DentAxisID      = Shader.PropertyToID("_DentAxis");
     static readonly int DentRightID     = Shader.PropertyToID("_DentRight");
     static readonly int DentParamsID    = Shader.PropertyToID("_DentParams");
+    static readonly int DentBulgeID     = Shader.PropertyToID("_DentBulge");
+    static readonly int DentDecayID     = Shader.PropertyToID("_DentDecay");
     static readonly int DentCountID     = Shader.PropertyToID("_DentCount");
     static readonly int PrevTexID       = Shader.PropertyToID("_PrevDentMap");
     static readonly int DecayID         = Shader.PropertyToID("_Decay");
+    static readonly int DecayDepthBiasID = Shader.PropertyToID("_DecayDepthBias");
     static readonly int FlipYID         = Shader.PropertyToID("_FlipY");
     static readonly int DebugStampAllID = Shader.PropertyToID("_DebugStampAll");
     static readonly int IslandPushID    = Shader.PropertyToID("_IslandPush");
@@ -104,8 +114,14 @@ public class DentManager : MonoBehaviour
     readonly Vector4[] dentAxis   = new Vector4[MAX_DENTS];
     // xyz = world right (+X, orients Square), w = flatten scale
     readonly Vector4[] dentRight  = new Vector4[MAX_DENTS];
-    // x = inner radius, y = outer radius, z = strength, w = unused
+    // x = inner radius, y = outer radius, z = strength, w = spread amount
     readonly Vector4[] dentParams = new Vector4[MAX_DENTS];
+    // x = rim bulge amount, y = bulge reach, z = normal bias, w = press depth
+    readonly Vector4[] dentBulge  = new Vector4[MAX_DENTS];
+    // x = decay multiplier for dents this stamp creates
+    readonly Vector4[] dentDecay  = new Vector4[MAX_DENTS];
+    /// <summary>Deepest penetration each active source achieves anywhere on the mesh.</summary>
+    readonly float[] pressDepth = new float[MAX_DENTS];
     // xyz = OBJECT space rigid push for this island, w = rigidity 0..1
     readonly Vector4[] islandPush = new Vector4[MAX_ISLANDS];
 
@@ -243,6 +259,7 @@ public class DentManager : MonoBehaviour
         if (!EnsureInitialised()) return;
 
         CollectActiveSources();
+        ComputePressDepths();
 
         RenderTexture src = aIsCurrent ? rtA : rtB;
         RenderTexture dst = aIsCurrent ? rtB : rtA;
@@ -256,11 +273,14 @@ public class DentManager : MonoBehaviour
         stampInstance.SetVectorArray(DentAxisID, dentAxis);
         stampInstance.SetVectorArray(DentRightID, dentRight);
         stampInstance.SetVectorArray(DentParamsID, dentParams);
+        stampInstance.SetVectorArray(DentBulgeID, dentBulge);
+        stampInstance.SetVectorArray(DentDecayID, dentDecay);
         stampInstance.SetInt(DentCountID, ActiveDentCount);
         stampInstance.SetVectorArray(IslandPushID, islandPush);
         stampInstance.SetInt(IslandCountID, Mathf.Min(generator.IslandCount, MAX_ISLANDS));
         stampInstance.SetTexture(PrevTexID, src);
         stampInstance.SetFloat(DecayID, CurrentDecay);
+        stampInstance.SetFloat(DecayDepthBiasID, Mathf.Max(decayDepthBias, 0f));
         stampInstance.SetFloat(FlipYID, flipY ? 1f : 0f);
         stampInstance.SetFloat(DebugStampAllID, debugStampAll ? 1f : 0f);
 
@@ -318,7 +338,13 @@ public class DentManager : MonoBehaviour
             dentPos[i]    = new Vector4(p.x, p.y, p.z, (float)s.shape);
             dentAxis[i]   = new Vector4(axis.x, axis.y, axis.z, Mathf.Max(s.depth, 0.0001f));
             dentRight[i]  = new Vector4(right.x, right.y, right.z, Mathf.Clamp01(s.flattenScale));
-            dentParams[i] = new Vector4(s.SafeInnerRadius, s.SafeOuterRadius, s.strength, s.spreadAmount);
+            dentParams[i] = new Vector4(s.SafeInnerRadius, s.SafeOuterRadius, s.strength, s.EffectiveSpread);
+            dentBulge[i]  = new Vector4(s.rimBulge, Mathf.Max(s.bulgeReach, 1f),
+                                        Mathf.Clamp01(s.bulgeNormalBias), DriverFor(i));
+            dentDecay[i]  = new Vector4(Mathf.Max(s.decayMultiplier, 0f), 0f, 0f, 0f);
+
+            // Fed back purely so the Plane gizmo can draw its real splay height.
+            s.lastPressDepth = DriverFor(i);
         }
 
         for (int i = count; i < MAX_DENTS; i++)
@@ -327,6 +353,8 @@ public class DentManager : MonoBehaviour
             dentAxis[i]   = Vector4.zero;
             dentRight[i]  = Vector4.zero;
             dentParams[i] = Vector4.zero;
+            dentBulge[i]  = Vector4.zero;
+            dentDecay[i]  = Vector4.zero;
         }
     }
 
@@ -352,7 +380,9 @@ public class DentManager : MonoBehaviour
 
             for (int s = 0; s < samples.Length; s++)
             {
-                Vector3 pushWS = EvaluateDentWorld(tr.TransformPoint(samples[s]));
+                // Island pushes drive whole rigid parts, where the rim bulge is not
+                // meaningful, so a zero normal is passed deliberately.
+                Vector3 pushWS = EvaluateDentWorld(tr.TransformPoint(samples[s]), Vector3.zero, out _);
                 float magSq = pushWS.sqrMagnitude;
                 if (magSq > bestMagSq)
                 {
@@ -384,10 +414,91 @@ public class DentManager : MonoBehaviour
     // Keep these two in step: if the shape logic changes there, change it here.
     // --------------------------------------------------------------------
 
-    Vector3 EvaluateDentWorld(Vector3 worldPos)
+    /// <summary>
+    /// How deeply each active source is pressed into the mesh, measured across the island
+    /// sample points.
+    ///
+    /// The bulge needs this: material displaced by a press has to go somewhere, and no
+    /// single vertex can know how squashed the object is - a vertex sitting above the
+    /// contact has no penetration of its own to go on.
+    /// </summary>
+    void ComputePressDepths()
+    {
+        Transform tr = targetRenderer.transform;
+
+        for (int i = 0; i < active.Count; i++) pressDepth[i] = 0f;
+
+        if (generator == null || generator.IslandSamples == null) return;
+
+        int islands = Mathf.Min(generator.IslandCount, MAX_ISLANDS);
+
+        for (int island = 0; island < islands; island++)
+        {
+            Vector3[] samples = generator.IslandSamples[island];
+            for (int s = 0; s < samples.Length; s++)
+            {
+                Vector3 world = tr.TransformPoint(samples[s]);
+                for (int i = 0; i < active.Count; i++)
+                {
+                    float pen = Penetration(active[i], world);
+                    if (pen > pressDepth[i]) pressDepth[i] = pen;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Bulge driver for a source: how deep it is pressed in, capped by its own clamp.
+    /// Without the clamp a single long protrusion dipping deep inflates the bulge across
+    /// the whole object.
+    /// </summary>
+    float DriverFor(int sourceIndex)
+    {
+        float clamp = active[sourceIndex].bulgeClamp;
+        float depth = pressDepth[sourceIndex];
+        return clamp > 0f ? Mathf.Min(depth, clamp) : depth;
+    }
+
+    /// <summary>How far a world point sits inside a source's contact surface.</summary>
+    static float Penetration(DentSource s, Vector3 worldPos)
+    {
+        Vector3 axis = s.transform.forward;
+        Vector3 right = s.transform.right;
+        Vector3 toPoint = worldPos - s.transform.position;
+
+        float outer = s.SafeOuterRadius;
+        float axial = Vector3.Dot(toPoint, axis);
+
+        float lat;
+        if (s.shape == DentShape.Square || s.shape == DentShape.Plane)
+        {
+            Vector3 up = Vector3.Cross(axis, right);
+            lat = Mathf.Max(Mathf.Abs(Vector3.Dot(toPoint, right)),
+                            Mathf.Abs(Vector3.Dot(toPoint, up)));
+        }
+        else
+        {
+            lat = Vector3.ProjectOnPlane(toPoint, axis).magnitude;
+        }
+
+        float surfaceAxial;
+        if (s.shape == DentShape.Plane)
+        {
+            surfaceAxial = lat <= outer ? 0f : -1e9f;
+        }
+        else
+        {
+            surfaceAxial = DentSurfaceAxial(lat, s.SafeInnerRadius, outer);
+        }
+
+        return Mathf.Clamp(surfaceAxial - axial, 0f, Mathf.Max(s.depth, 0.0001f));
+    }
+
+    Vector3 EvaluateDentWorld(Vector3 worldPos, Vector3 worldNormal, out float decayMul)
     {
         Vector3 bestDisp = Vector3.zero;
         float bestMagSq = 0f;
+        decayMul = 1f;
 
         for (int i = 0; i < active.Count; i++)
         {
@@ -406,9 +517,9 @@ public class DentManager : MonoBehaviour
             float radial = radialV.magnitude;
             Vector3 outward = radial > 1e-5f ? radialV / radial : Vector3.zero;
 
-            // Square uses a Chebyshev cross-section; the other two are round.
+            // Square and Plane use a Chebyshev cross-section; the other two are round.
             float lat;
-            if (s.shape == DentShape.Square)
+            if (s.shape == DentShape.Square || s.shape == DentShape.Plane)
             {
                 Vector3 up = Vector3.Cross(axis, right);
                 lat = Mathf.Max(Mathf.Abs(Vector3.Dot(toPoint, right)),
@@ -419,26 +530,60 @@ public class DentManager : MonoBehaviour
                 lat = radial;
             }
 
-            // Capsule is simply the punch with no flat face at all.
-            float innerEff = s.shape == DentShape.Capsule ? 0f : inner;
+            // Capsule has no flat face; Plane is flat right to its edge.
+            float innerEff = inner;
 
-            float surfaceAxial = DentSurfaceAxial(lat, innerEff, outer);
+            // A Plane is flat right to its edge - no rim fillet.
+            float surfaceAxial = s.shape == DentShape.Plane
+                ? (lat <= outer ? 0f : -1e9f)
+                : DentSurfaceAxial(lat, innerEff, outer);
 
             float penetration = Mathf.Clamp(surfaceAxial - axial, 0f, Mathf.Max(s.depth, 0.0001f));
             float push = penetration * (1f - Mathf.Clamp01(s.flattenScale));
 
-            // Sideways spread, peaking around the inner radius.
+            // Sideways spread, inside the contact, peaking around the inner radius.
             float peak = Mathf.Max(innerEff, outer * 0.15f);
             float rampIn = SmoothStep01(0f, peak, lat);
             float rampOut = 1f - SmoothStep01(peak, outer, lat);
-            float bulge = push * s.spreadAmount * rampIn * rampOut;
+            float bulge = push * s.EffectiveSpread * rampIn * rampOut;
 
-            Vector3 disp = (axis * push + outward * bulge) * s.strength;
+            // Rim bulge / splay.
+            float rim;
+            Vector3 rimDir;
+
+            if (s.shape == DentShape.Plane)
+            {
+                // Resting on a hard surface: the squashed volume splays outward just above
+                // the plane and never crosses it.
+                float driver = DriverFor(i);
+                float height = Mathf.Max(driver * Mathf.Max(s.bulgeReach, 1f), 1e-5f);
+                float above = axial > 0f ? 1f - SmoothStep01(0f, height, axial) : 0f;
+
+                rim = driver * s.rimBulge * above;
+                rimDir = outward;
+            }
+            else
+            {
+                // A punch: the pile straddles the contact plane rather than sitting only
+                // on the approach side.
+                float driver = DriverFor(i);
+                float reach = Mathf.Max(s.bulgeReach, 1f);
+                float axialProf = 1f - SmoothStep01(0f, Mathf.Max(driver, 1e-5f), Mathf.Abs(axial));
+                float rimIn = SmoothStep01(innerEff, outer, lat);
+                float rimOut = 1f - SmoothStep01(outer, outer * reach, lat);
+
+                rim = driver * s.rimBulge * rimIn * rimOut * axialProf * (1f - Mathf.Clamp01(s.flattenScale));
+                rimDir = Vector3.Lerp(-axis, worldNormal, Mathf.Clamp01(s.bulgeNormalBias));
+                if (rimDir.sqrMagnitude > 1e-8f) rimDir.Normalize();
+            }
+
+            Vector3 disp = (axis * push + outward * bulge + rimDir * rim) * s.strength;
             float magSq = disp.sqrMagnitude;
             if (magSq > bestMagSq)
             {
                 bestMagSq = magSq;
                 bestDisp = disp;
+                decayMul = Mathf.Max(s.decayMultiplier, 0f);
             }
         }
 
@@ -472,12 +617,16 @@ public class DentManager : MonoBehaviour
     /// which the CPU has no view of. Callers that need history must accumulate it
     /// themselves using the same max-with-decay rule.
     /// </summary>
-    public Vector3 EvaluateDisplacementOS(Vector3 localPos, int islandId)
+    public Vector3 EvaluateDisplacementOS(Vector3 localPos, Vector3 localNormal, int islandId,
+                                          out float decayMul)
     {
+        decayMul = 1f;
         if (targetRenderer == null) return Vector3.zero;
 
         Transform tr = targetRenderer.transform;
-        Vector3 perVertexOS = tr.InverseTransformDirection(EvaluateDentWorld(tr.TransformPoint(localPos)));
+        Vector3 worldNormal = tr.TransformDirection(localNormal).normalized;
+        Vector3 perVertexOS = tr.InverseTransformDirection(
+            EvaluateDentWorld(tr.TransformPoint(localPos), worldNormal, out decayMul));
 
         if (islandId < 0 || islandId >= MAX_ISLANDS) return perVertexOS;
 
@@ -487,8 +636,19 @@ public class DentManager : MonoBehaviour
                             Mathf.Clamp01(island.w));
     }
 
-    /// <summary>Same decay factor the stamp shader uses this frame.</summary>
+    /// <summary>Same base decay factor the stamp shader uses this frame.</summary>
     public float CurrentDecay => Mathf.Pow(1f - decayPerSecond, Time.deltaTime);
+
+    /// <summary>
+    /// Effective decay for one accumulated value, matching the stamp shader: the source's
+    /// own multiplier, plus extra proportional to how deep the dent is.
+    /// </summary>
+    public float DecayFor(float storedMultiplier, float magnitude)
+    {
+        float rate = Mathf.Max(storedMultiplier, 0f)
+                     * (1f + Mathf.Max(decayDepthBias, 0f) * magnitude);
+        return Mathf.Pow(CurrentDecay, rate);
+    }
 
     void Release()
     {

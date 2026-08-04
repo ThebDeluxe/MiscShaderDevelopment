@@ -82,7 +82,6 @@ public class DentVertexUVGenerator : MonoBehaviour
         TextureSize = Mathf.NextPowerOfTwo(Mathf.CeilToInt(Mathf.Sqrt(VertexCount)));
 
         int[] islandOf = BuildIslands(instancedMesh, verts);
-
         var uv = new List<Vector4>(VertexCount);
         for (int i = 0; i < VertexCount; i++)
         {
@@ -99,7 +98,7 @@ public class DentVertexUVGenerator : MonoBehaviour
         instancedMesh.SetUVs(targetUVChannel, uv);
         meshFilter.mesh = instancedMesh;
 
-        BuildPointMesh(verts, uv);
+        BuildPointMesh(verts, instancedMesh.normals, uv);
 
         IsGenerated = true;
         Debug.Log($"{name}: dent data generated. {VertexCount} verts -> {TextureSize}x{TextureSize}, " +
@@ -161,7 +160,7 @@ public class DentVertexUVGenerator : MonoBehaviour
 
     // --------------------------------------------------------------------
 
-    void BuildPointMesh(Vector3[] verts, List<Vector4> uv)
+    void BuildPointMesh(Vector3[] verts, Vector3[] normals, List<Vector4> uv)
     {
         PointMesh = new Mesh
         {
@@ -171,6 +170,13 @@ public class DentVertexUVGenerator : MonoBehaviour
 
         PointMesh.SetVertices(verts);
         PointMesh.SetUVs(targetUVChannel, uv);
+
+        // The rim bulge in the stamp shader follows the surface, so it needs normals.
+        if (normals != null && normals.Length == VertexCount)
+            PointMesh.SetNormals(normals);
+        else
+            Debug.LogWarning($"{name}: mesh has no usable normals, so the dent rim bulge " +
+                             "will have no direction to follow.", this);
 
         int[] pointIndices = new int[VertexCount];
         for (int i = 0; i < VertexCount; i++) pointIndices[i] = i;

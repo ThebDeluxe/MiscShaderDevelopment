@@ -10,7 +10,14 @@ public enum DentShape
     /// <summary>Round flat face with a rounded rim, like the end of a cylinder.</summary>
     Cylinder = 1,
     /// <summary>Square flat face with a rounded rim, like the end of a cuboid.</summary>
-    Square = 2
+    Square = 2,
+    /// <summary>
+    /// A hard flat surface the object RESTS ON, rather than a punch pressed into it.
+    /// Everything below it conforms to it, and the displaced volume splays outward just
+    /// above the contact instead of piling up behind. Uses Outer Radius as its half size;
+    /// Inner Radius is ignored.
+    /// </summary>
+    Plane = 3
 }
 
 /// <summary>
@@ -33,11 +40,12 @@ public class DentSource : MonoBehaviour
 
     [Tooltip("Half-width of the flat contact face.\n" +
              "Beyond this the punch curves back in a rounded rim out to Outer Radius.\n" +
-             "Ignored by Capsule, which is this same punch with no flat face at all.")]
+             "Ignored by Capsule (no flat face) and Plane (flat right to its edge).")]
     public float innerRadius = 0.05f;
 
     [Tooltip("Half-width of the whole punch, including the rounded rim.\n" +
-             "For Capsule this is the tip radius.")]
+             "For Capsule this is the tip radius. For Plane it is the half size of the " +
+             "surface - make it comfortably larger than the object resting on it.")]
     public float outerRadius = 0.2f;
 
     [Tooltip("How much penetration gets flattened.\n" +
@@ -66,9 +74,57 @@ public class DentSource : MonoBehaviour
              "tapers to nothing at the outer radius - like skin bulging around a press.")]
     [Range(0f, 2f)] public float spreadAmount = 0.25f;
 
-    /// <summary>Inner radius, guaranteed below outer (smoothstep inverts otherwise).</summary>
-    public float SafeInnerRadius => Mathf.Min(innerRadius, outerRadius - 0.0001f);
+    [Tooltip("PUNCH shapes: material piling up behind the contact and rising back out of " +
+             "the press. Positive moves along -Z, negative along +Z.\n\n" +
+             "PLANE: how far the squashed volume splays sideways. Scales automatically with " +
+             "how deep the object is pressed into the surface.\n\n" +
+             "0 disables it.")]
+    [Range(-5f, 5f)] public float rimBulge = 0.35f;
+
+    [Tooltip("PUNCH shapes: how far past the outer radius the bulge reaches, as a multiple " +
+             "of it.\n\n" +
+             "PLANE: how far ABOVE the surface the splay reaches, as a multiple of the " +
+             "press depth.")]
+    [Range(1f, 4f)] public float bulgeReach = 1.8f;
+
+    [Tooltip("Punch shapes only. Which way the bulge moves.\n" +
+             "0 = straight back out of the press, along -Z. Reliable everywhere.\n" +
+             "1 = along the vertex normal, which follows the surface but points the wrong " +
+             "way on parts of a curved shape.\n\n" +
+             "Plane always splays outward and ignores this.")]
+    [Range(0f, 1f)] public float bulgeNormalBias = 0f;
+
+    [Tooltip("What drives the bulge strength.\n\n" +
+             "Bulge scales with how far this stamp is pressed into the mesh. This caps that " +
+             "driver, so a single long protrusion dipping deep cannot inflate the bulge " +
+             "across the whole object.\n\n" +
+             "0 = no clamp.")]
+    public float bulgeClamp = 0.25f;
+
+    [Tooltip("Multiplier on DentManager's decay rate for dents this stamp creates.\n" +
+             "1 = the manager's rate. Above 1 fades faster, below 1 lingers.\n" +
+             "0 makes this stamp's dents permanent regardless of the manager.")]
+    [Range(0f, 5f)] public float decayMultiplier = 1f;
+
+    /// <summary>Inner radius, guaranteed below outer (smoothstep inverts otherwise).
+    /// Capsule and Plane have no flat face, so it is zero for them.</summary>
+    public float SafeInnerRadius =>
+        shape == DentShape.Capsule || shape == DentShape.Plane
+            ? 0f
+            : Mathf.Min(innerRadius, outerRadius - 0.0001f);
+
     public float SafeOuterRadius => Mathf.Max(outerRadius, 0.0001f);
+
+    /// <summary>Sideways spread inside the contact. Meaningless for a Plane, whose
+    /// displaced volume is handled by the splay instead.</summary>
+    public float EffectiveSpread => shape == DentShape.Plane ? 0f : spreadAmount;
+
+    /// <summary>
+    /// Deepest penetration this source achieved last frame, written by DentManager.
+    /// Runtime only - it exists so the Plane gizmo can show the real splay height rather
+    /// than a guess.
+    /// </summary>
+    [System.NonSerialized] public float lastPressDepth;
 
     void OnEnable() => DentManager.Register(this);
     void OnDisable() => DentManager.Unregister(this);
@@ -78,6 +134,7 @@ public class DentSource : MonoBehaviour
         innerRadius = Mathf.Max(0f, innerRadius);
         outerRadius = Mathf.Max(innerRadius + 0.0001f, outerRadius);
         depth       = Mathf.Max(0.0001f, depth);
+        bulgeClamp  = Mathf.Max(0f, bulgeClamp);
     }
 
     void OnDrawGizmos()
@@ -140,6 +197,12 @@ public class DentSource : MonoBehaviour
                 DrawSquare(p + back, outerRadius);
                 DrawSquareRails(p, back, outerRadius);
                 break;
+
+            case DentShape.Plane:
+                // Just the surface itself: no body, no rim, no inner radius.
+                Gizmos.color = outerCol;
+                DrawSquare(p, outerRadius);
+                break;
         }
 
         // Press direction. This drives both the depth and the displacement direction.
@@ -149,7 +212,55 @@ public class DentSource : MonoBehaviour
         Gizmos.DrawLine(tip, tip - fwd * (outerRadius * 0.3f) + transform.right * (outerRadius * 0.15f));
         Gizmos.DrawLine(tip, tip - fwd * (outerRadius * 0.3f) - transform.right * (outerRadius * 0.15f));
 
-        DrawSpreadArrows(p, fwd);
+        // Only draw what the current mode actually uses.
+        if (shape == DentShape.Plane)
+        {
+            DrawPlaneSplay(p, fwd);
+        }
+        else
+        {
+            DrawSpreadArrows(p, fwd);
+            DrawBulgeRing(p, fwd);
+        }
+    }
+
+    /// <summary>
+    /// Plane splay: a square volume rising along +Z off the surface. Height is the press
+    /// depth times the reach multiplier, so out of play mode it can only be estimated.
+    /// </summary>
+    void DrawPlaneSplay(Vector3 p, Vector3 fwd)
+    {
+        if (Mathf.Abs(rimBulge) <= 0.001f) return;
+
+        bool measured = lastPressDepth > 1e-5f;
+        float pressDepth = measured ? lastPressDepth : outerRadius * 0.1f;
+        float height = pressDepth * Mathf.Max(bulgeReach, 1f);
+
+        Gizmos.color = new Color(0.4f, 1f, 0.5f, 0.8f);
+        DrawSquare(p + fwd * height, outerRadius);
+        DrawSquareRails(p, fwd * height, outerRadius);
+
+#if UNITY_EDITOR
+        Handles.color = new Color(0.4f, 1f, 0.5f, 1f);
+        Handles.Label(p + fwd * height + transform.right * outerRadius,
+                      measured
+                          ? $"splay {rimBulge:0.00}, height {height:0.000}"
+                          : $"splay {rimBulge:0.00}, height x{bulgeReach:0.0} of press depth (estimated)");
+#endif
+    }
+
+    /// <summary>Where the elephant-foot bulge fades out.</summary>
+    void DrawBulgeRing(Vector3 p, Vector3 fwd)
+    {
+        if (Mathf.Abs(rimBulge) <= 0.001f) return;
+
+#if UNITY_EDITOR
+        Handles.color = new Color(1f, 0.85f, 0.3f, 0.6f);
+        Handles.DrawWireDisc(p, fwd, outerRadius * bulgeReach);
+        Handles.color = new Color(1f, 0.85f, 0.3f, 1f);
+        Handles.Label(p - transform.up * (outerRadius * bulgeReach + 0.02f),
+                      $"rim bulge {rimBulge:0.00}");
+#endif
     }
 
     /// <summary>

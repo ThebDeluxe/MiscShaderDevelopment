@@ -28,10 +28,16 @@
 //   _DentPos[i]    : xyz = world position of the contact point, w = shape id
 //   _DentAxis[i]   : xyz = world press axis (+Z),               w = depth
 //   _DentRight[i]  : xyz = world right (+X, orients Square),    w = flatten scale
-//   _DentParams[i] : x = inner radius, y = outer radius, z = strength, w = unused
+//   _DentParams[i] : x = inner radius, y = outer radius, z = strength, w = spread amount
 //   _IslandPush[j] : xyz = OBJECT space rigid push for island j, w = rigidity 0..1
 //
 // Shape ids: 0 = Capsule, 1 = Cylinder, 2 = Square.
+
+// PERPENDICULAR SPREAD
+// Material pushed out of the way has to go somewhere, so it bulges sideways around the
+// contact. The sideways amount is proportional to how much was pushed in, and its radial
+// profile peaks near the inner radius: nothing at the very centre (nothing to spread),
+// nothing past the outer radius.
 
 #define DENT_MAX   32
 #define ISLAND_MAX 32
@@ -130,21 +136,36 @@ float3 EvaluateDentWorld(float3 WorldPos)
         float inner    = _DentParams[i].x;
         float outer    = _DentParams[i].y;
         float strength = _DentParams[i].z;
+        float spread   = _DentParams[i].w;
 
         float axial = dot(toPoint, axis);
+
+        // Component across the axis: gives both the round cross-section distance and
+        // the outward direction the spread pushes along.
+        float3 radialV = toPoint - axial * axis;
+        float  radial  = length(radialV);
+        float3 outward = (radial > 1e-5) ? (radialV / radial) : float3(0, 0, 0);
 
         // Square uses a Chebyshev cross-section; the other two are round.
         float lat = (shapeId > 1.5)
             ? DentLateral_Square(toPoint, axis, right)
-            : DentLateral_Round(toPoint, axis);
+            : radial;
 
         // Capsule is simply the punch with no flat face at all.
         float innerEff = (shapeId < 0.5) ? 0.0 : inner;
 
         float surfaceAxial = DentSurfaceAxial(lat, innerEff, outer);
-
         float push = DentPress_Axial(axial, surfaceAxial, depth, flatten);
-        float3 disp = axis * (push * strength);
+
+        // Radial profile for the spread: rises from the centre, peaks around the inner
+        // radius, falls to nothing at the outer radius. The lower bound on the ramp width
+        // stops a zero inner radius (Capsule) producing a discontinuity at the axis.
+        float peak    = max(innerEff, outer * 0.15);
+        float rampIn  = smoothstep(0.0, peak, lat);
+        float rampOut = 1.0 - smoothstep(peak, outer, lat);
+        float bulge   = push * spread * rampIn * rampOut;
+
+        float3 disp = (axis * push + outward * bulge) * strength;
 
         // Strongest source wins rather than summing, so overlapping stamps of the
         // same depth read as one dent instead of a doubly deep one.

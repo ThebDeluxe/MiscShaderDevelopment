@@ -31,9 +31,10 @@ public class DentColliderRig : MonoBehaviour
     public class SphereBinding
     {
         public int islandId;
-        public Vector3 restCentre;    // local space
+        public Vector3 restCentre;    // local space, already inset below the surface
         public float restRadius;
-        public float restSpread;      // mean distance from centre to stored members
+        public float restSpread;      // mean distance from restCentre to stored members
+        public Vector3 centreOffset;  // restCentre minus the mean of the stored members
         public int[] members;         // vertex indices driving this sphere
     }
 
@@ -53,10 +54,19 @@ public class DentColliderRig : MonoBehaviour
     [Tooltip("Hard cap per island, so one huge island cannot generate hundreds of colliders.")]
     public int maxSpheresPerIsland = 24;
 
-    [Tooltip("Radius is the mean distance from the cluster centre to its members, scaled " +
-             "by this. Above 1 over-covers slightly, which is usually what you want since " +
-             "overlapping spheres fill gaps.")]
-    public float radiusScale = 1.15f;
+    [Tooltip("How far to sink each sphere below the surface, as a fraction of the cluster's " +
+             "mean spread. Clusters sit ON the surface, so without this the spheres bulge " +
+             "outward. Around 0.5 usually keeps them inside.")]
+    [Range(0f, 1.5f)] public float surfaceInset = 0.6f;
+
+    [Tooltip("Radius is taken at this percentile of the distances from the sphere centre to " +
+             "its cluster vertices. Low values fit inside the surface; 1 would touch the " +
+             "furthest vertex and poke out. Overlapping neighbours fill the gaps.")]
+    [Range(0f, 1f)] public float radiusPercentile = 0.3f;
+
+    [Tooltip("Final multiplier on the fitted radius. Slightly above 1 over-covers, slightly " +
+             "below tucks the spheres further in.")]
+    public float radiusScale = 1f;
 
     [Tooltip("How many vertices each sphere stores for runtime skinning. More is smoother " +
              "but costs more per frame.")]
@@ -107,6 +117,14 @@ public class DentColliderRig : MonoBehaviour
         }
 
         Vector3[] verts = mesh.vertices;
+        Vector3[] normals = mesh.normals;
+        if (normals == null || normals.Length != verts.Length)
+        {
+            Debug.LogWarning($"{name}: mesh has no usable normals, spheres cannot be inset " +
+                             "below the surface and will sit proud of it.", this);
+            normals = null;
+        }
+
         int[] islandOf = DentMeshIslands.Build(mesh, verts, weldEpsilon, out int islandCount);
         var islandMembers = DentMeshIslands.GroupByIsland(islandOf, islandCount);
 
@@ -131,13 +149,13 @@ public class DentColliderRig : MonoBehaviour
             int derived = Mathf.RoundToInt(density * (extent * 2f) / Mathf.Max(targetSphereRadius * 2f, 1e-4f));
             int clusterCount = Mathf.Clamp(derived, 1, Mathf.Min(maxSpheresPerIsland, list.Count));
 
-            BakeIsland(verts, list, island, clusterCount);
+            BakeIsland(verts, normals, list, island, clusterCount);
         }
 
         Debug.Log($"{name}: baked {bindings.Count} collider spheres across {islandCount} island(s).", this);
     }
 
-    void BakeIsland(Vector3[] verts, List<int> islandVerts, int islandId, int clusterCount)
+    void BakeIsland(Vector3[] verts, Vector3[] normals, List<int> islandVerts, int islandId, int clusterCount)
     {
         // Seed centres from an evenly strided subset, so they start spread over the whole
         // island rather than clumped wherever the vertex order happens to begin.
@@ -187,6 +205,39 @@ public class DentColliderRig : MonoBehaviour
             var bucket = buckets[c];
             if (bucket.Count == 0) continue;   // k-means can orphan a cluster
 
+            // Fit against the WHOLE cluster, not just the members we keep for skinning,
+            // so the sphere reflects the real surface patch.
+            Vector3 surfaceCentre = Vector3.zero;
+            Vector3 meanNormal = Vector3.zero;
+            for (int k = 0; k < bucket.Count; k++)
+            {
+                surfaceCentre += verts[bucket[k]];
+                if (normals != null) meanNormal += normals[bucket[k]];
+            }
+            surfaceCentre /= bucket.Count;
+
+            float meanSpread = 0f;
+            for (int k = 0; k < bucket.Count; k++)
+                meanSpread += Vector3.Distance(verts[bucket[k]], surfaceCentre);
+            meanSpread /= bucket.Count;
+
+            // Sink the centre below the surface. Cluster centres land ON the shell, so
+            // without this every sphere bulges outward by roughly its own radius.
+            Vector3 centre = surfaceCentre;
+            if (normals != null && meanNormal.sqrMagnitude > 1e-8f)
+                centre -= meanNormal.normalized * (meanSpread * surfaceInset);
+
+            // Radius at a low percentile of the distances, so the sphere fits inside the
+            // surface rather than reaching the furthest stray vertex.
+            var distances = new List<float>(bucket.Count);
+            for (int k = 0; k < bucket.Count; k++)
+                distances.Add(Vector3.Distance(verts[bucket[k]], centre));
+            distances.Sort();
+
+            int pIndex = Mathf.Clamp(Mathf.FloorToInt(radiusPercentile * (distances.Count - 1)),
+                                     0, distances.Count - 1);
+            float radius = Mathf.Max(distances[pIndex] * radiusScale, 1e-4f);
+
             // Store a strided subset for runtime skinning.
             int take = Mathf.Min(maxMembersPerSphere, bucket.Count);
             var members = new int[take];
@@ -197,11 +248,12 @@ public class DentColliderRig : MonoBehaviour
                 members[m] = bucket[idx];
             }
 
-            // Rest centre and spread are measured from the STORED members, so the runtime
-            // ratio compares like with like.
-            Vector3 centre = Vector3.zero;
-            for (int m = 0; m < take; m++) centre += verts[members[m]];
-            centre /= take;
+            // The runtime tracks the mean of the STORED members, so remember how far the
+            // fitted centre sits from that mean and re-apply it each frame. Without this
+            // the sphere would jump to the surface on the first update.
+            Vector3 storedMean = Vector3.zero;
+            for (int m = 0; m < take; m++) storedMean += verts[members[m]];
+            storedMean /= take;
 
             float spread = 0f;
             for (int m = 0; m < take; m++) spread += Vector3.Distance(verts[members[m]], centre);
@@ -211,8 +263,9 @@ public class DentColliderRig : MonoBehaviour
             {
                 islandId = islandId,
                 restCentre = centre,
-                restRadius = Mathf.Max(spread * radiusScale, 1e-4f),
+                restRadius = radius,
                 restSpread = Mathf.Max(spread, 1e-5f),
+                centreOffset = centre - storedMean,
                 members = members
             });
         }
@@ -303,7 +356,7 @@ public class DentColliderRig : MonoBehaviour
             int flat = memberFlatIndex[b];
             int count = bind.members.Length;
 
-            Vector3 centre = Vector3.zero;
+            Vector3 memberMean = Vector3.zero;
 
             for (int m = 0; m < count; m++)
             {
@@ -316,10 +369,14 @@ public class DentColliderRig : MonoBehaviour
                 Vector3 result = current.sqrMagnitude > decayed.sqrMagnitude ? current : decayed;
                 accumulated[flat + m] = result;
 
-                centre += rest + result;
+                memberMean += rest + result;
             }
 
-            centre /= count;
+            memberMean /= count;
+
+            // Re-apply the bake-time inset so the sphere stays buried rather than
+            // snapping to the surface.
+            Vector3 centre = memberMean + bind.centreOffset;
 
             float spread = 0f;
             for (int m = 0; m < count; m++)

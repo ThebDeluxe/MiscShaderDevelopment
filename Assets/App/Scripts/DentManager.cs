@@ -3,36 +3,55 @@ using UnityEngine;
 using UnityEngine.Rendering;
 
 /// <summary>
-/// Drives the dent map: every frame it stamps all active DentSources into a
-/// double-buffered RenderTexture, then publishes the result as a global texture
-/// for the character shader to read in its vertex stage.
+/// Drives the dent map for ONE renderer: every frame it stamps the dent sources that
+/// actually reach it into a double-buffered RenderTexture, then assigns the result to
+/// that renderer's own material.
 ///
-/// The map stores an OBJECT SPACE DISPLACEMENT VECTOR in RGB (A is unused for now),
-/// so it needs a signed, higher-precision format - ARGBHalf. An 8-bit format cannot
-/// store signed directions, and its quantisation also stalls the decay.
+/// Multiple dented objects are supported. Each manager owns its own render textures,
+/// its own instance of the stamp material, and writes to its own material instance -
+/// so nothing is shared and nothing collides. Sources are filtered per manager by
+/// bounds, so punching one character does not dent the others.
+///
+/// The map stores an OBJECT SPACE DISPLACEMENT VECTOR in RGB (A unused), so it needs a
+/// signed floating point format - ARGBHalf. An 8-bit format cannot store signed
+/// directions, and its quantisation also stalls the decay.
 ///
 /// The stamp pass draws the mesh as POINTS into texel space (see DentVertexUVGenerator),
 /// so each vertex writes exactly one texel. Camera independent, and independent of the
 /// authored UV0 layout.
 ///
-/// Play mode only, deliberately: creating mesh/RT instances in edit mode leaks assets.
+/// Play mode only, deliberately: creating mesh/RT/material instances in edit mode leaks.
 /// </summary>
 public class DentManager : MonoBehaviour
 {
     [Header("Target")]
     public Renderer targetRenderer;
+
+    [Tooltip("Source asset for the stamp pass. Each manager instantiates its own copy, so " +
+             "several dented objects can share this asset without fighting over it.")]
     public Material stampMaterial;
 
     [Tooltip("Must be a signed, floating point format. ARGBHalf is the sane default; " +
              "RGBA8 cannot store negative direction components.")]
     public RenderTextureFormat format = RenderTextureFormat.ARGBHalf;
 
+    [Header("Output")]
+    [Tooltip("Texture property on the CHARACTER material that receives the dent map.\n" +
+             "This must be a Per Material scope property in the shader graph - a Global " +
+             "scope one cannot be set per object.")]
+    public string dentTextureProperty = "_CustomRT_Dents";
+
     [Header("Decay")]
     [Tooltip("Fraction of the dent magnitude lost per second. 0 = dents are permanent.")]
     [Range(0f, 1f)] public float decayPerSecond = 0.15f;
 
-    [Header("Output")]
-    public string globalTextureName = "_CustomRT_Dents";
+    [Header("Source Filtering")]
+    [Tooltip("Only stamp sources whose reach overlaps this renderer's bounds. Keeps several " +
+             "dented objects independent, and skips work for distant sources.")]
+    public bool filterSourcesByBounds = true;
+
+    [Tooltip("Extra slack on the bounds test, in world units.")]
+    public float boundsPadding = 0.05f;
 
     [Header("Island Rigidity")]
     [Tooltip("How much disconnected mesh parts move as a rigid block instead of being\n" +
@@ -41,21 +60,16 @@ public class DentManager : MonoBehaviour
     [Range(0f, 1f)] public float islandRigidity = 1f;
 
     [Tooltip("Islands with a local-space radius at or below this are FULLY rigid: the whole " +
-             "piece translates by one push value and does not bend at all.\n" +
-             "Meant for small detail parts that should keep their shape and their offset " +
-             "from whatever they sit on.")]
+             "piece translates by one push value and does not bend at all.")]
     public float rigidBelowRadius = 0.1f;
 
     [Tooltip("Islands at or above this local-space radius are pressed fully per-vertex, so " +
-             "they bend to the stamp.\n" +
-             "Between the two radii rigidity ramps smoothly, which avoids a hard population " +
-             "split where some pieces bend and others move as a solid block.")]
+             "they bend to the stamp. Between the two radii rigidity ramps smoothly.")]
     public float flexibleAboveRadius = 0.35f;
 
     [Header("Debug")]
     [Tooltip("Push EVERY vertex along object-space up, ignoring dent sources.\n" +
-             "If the mapping is correct the whole mesh should displace uniformly.\n" +
-             "If only parts move, the vertex->texel mapping is wrong (try Override Flip Y).")]
+             "If the mapping is correct the whole mesh should displace uniformly.")]
     public bool debugStampAll = false;
 
     [Tooltip("Leave off to auto-detect from SystemInfo.graphicsUVStartsAtTop.\n" +
@@ -78,11 +92,15 @@ public class DentManager : MonoBehaviour
     static readonly int IslandPushID    = Shader.PropertyToID("_IslandPush");
     static readonly int IslandCountID   = Shader.PropertyToID("_IslandCount");
 
-    static readonly List<DentSource> sources = new List<DentSource>();
+    /// <summary>Every enabled source in the scene. Each manager filters this down itself.</summary>
+    static readonly List<DentSource> allSources = new List<DentSource>();
+
+    /// <summary>The subset actually reaching this renderer, rebuilt each frame.</summary>
+    readonly List<DentSource> active = new List<DentSource>(MAX_DENTS);
 
     // xyz = world position of contact point, w = shape id (0 capsule, 1 cylinder, 2 square)
     readonly Vector4[] dentPos    = new Vector4[MAX_DENTS];
-    // xyz = world press axis (+Z),          w = depth (max penetration)
+    // xyz = world press axis (+Z),            w = depth
     readonly Vector4[] dentAxis   = new Vector4[MAX_DENTS];
     // xyz = world right (+X, orients Square), w = flatten scale
     readonly Vector4[] dentRight  = new Vector4[MAX_DENTS];
@@ -92,6 +110,9 @@ public class DentManager : MonoBehaviour
     readonly Vector4[] islandPush = new Vector4[MAX_ISLANDS];
 
     DentVertexUVGenerator generator;
+    Material stampInstance;      // our own copy, so managers never fight over uniforms
+    Material characterMaterial;  // renderer's instance, receives the dent map
+    int dentTextureID;
     RenderTexture rtA, rtB;
     bool aIsCurrent;
     CommandBuffer cmd;
@@ -99,31 +120,18 @@ public class DentManager : MonoBehaviour
 
     public RenderTexture CurrentDentMap => aIsCurrent ? rtA : rtB;
     public int TextureSize => generator != null ? generator.TextureSize : 0;
-    public int ActiveDentCount => Mathf.Min(sources.Count, MAX_DENTS);
+    public int ActiveDentCount => active.Count;
 
     public static void Register(DentSource s)
     {
-        if (!sources.Contains(s)) sources.Add(s);
+        if (!allSources.Contains(s)) allSources.Add(s);
     }
 
-    public static void Unregister(DentSource s) => sources.Remove(s);
-
-    void OnEnable()
-    {
-        // Entering play mode: make sure nothing is left over from a previous session.
-        Shader.SetGlobalTexture(globalTextureName, Texture2D.blackTexture);
-    }
+    public static void Unregister(DentSource s) => allSources.Remove(s);
 
     void OnDisable()
     {
         Release();
-    }
-
-    /// <summary>Wipes all accumulated dents back to zero.</summary>
-    public void ResetDents()
-    {
-        ClearRT(rtA);
-        ClearRT(rtB);
     }
 
     bool EnsureInitialised()
@@ -168,12 +176,30 @@ public class DentManager : MonoBehaviour
             format = RenderTextureFormat.ARGBFloat;
         }
 
+        // Our own stamp material, so two managers cannot overwrite each other's uniforms
+        // between setting them and the draw actually executing.
+        stampInstance = new Material(stampMaterial) { name = stampMaterial.name + " (Instance)" };
+
+        // Renderer's own material instance. Instances keep SRP Batcher compatibility,
+        // unlike MaterialPropertyBlock overrides.
+        characterMaterial = targetRenderer.material;
+        dentTextureID = Shader.PropertyToID(dentTextureProperty);
+
+        if (!characterMaterial.HasProperty(dentTextureID))
+        {
+            Debug.LogError($"{name}: material '{characterMaterial.name}' has no texture property " +
+                           $"'{dentTextureProperty}'. In the shader graph, set that property's Scope " +
+                           "to 'Per Material' - a Global scope property cannot be set per object.", this);
+            enabled = false;
+            return false;
+        }
+
         int size = generator.TextureSize;
         rtA = CreateRT(size);
         rtB = CreateRT(size);
         aIsCurrent = true;
 
-        cmd = new CommandBuffer { name = "Dent Stamp Pass" };
+        cmd = new CommandBuffer { name = $"Dent Stamp Pass ({targetRenderer.name})" };
 
         initialised = true;
         return true;
@@ -183,7 +209,7 @@ public class DentManager : MonoBehaviour
     {
         var rt = new RenderTexture(size, size, 0, format, RenderTextureReadWrite.Linear)
         {
-            name = $"DentMap_{size}",
+            name = $"DentMap_{name}_{size}",
             wrapMode = TextureWrapMode.Clamp,
             // Point is required: neighbouring texels belong to unrelated vertices,
             // so any filtering would blend garbage between them.
@@ -205,9 +231,18 @@ public class DentManager : MonoBehaviour
         RenderTexture.active = prevActive;
     }
 
+    /// <summary>Wipes all accumulated dents back to zero.</summary>
+    public void ResetDents()
+    {
+        ClearRT(rtA);
+        ClearRT(rtB);
+    }
+
     void LateUpdate()
     {
         if (!EnsureInitialised()) return;
+
+        CollectActiveSources();
 
         RenderTexture src = aIsCurrent ? rtA : rtB;
         RenderTexture dst = aIsCurrent ? rtB : rtA;
@@ -217,29 +252,56 @@ public class DentManager : MonoBehaviour
 
         bool flipY = overrideFlipY ? flipYValue : SystemInfo.graphicsUVStartsAtTop;
 
-        stampMaterial.SetVectorArray(DentPosID, dentPos);
-        stampMaterial.SetVectorArray(DentAxisID, dentAxis);
-        stampMaterial.SetVectorArray(DentRightID, dentRight);
-        stampMaterial.SetVectorArray(DentParamsID, dentParams);
-        stampMaterial.SetInt(DentCountID, ActiveDentCount);
-        stampMaterial.SetVectorArray(IslandPushID, islandPush);
-        stampMaterial.SetInt(IslandCountID, Mathf.Min(generator.IslandCount, MAX_ISLANDS));
-        stampMaterial.SetTexture(PrevTexID, src);
-        stampMaterial.SetFloat(DecayID, Mathf.Pow(1f - decayPerSecond, Time.deltaTime));
-        stampMaterial.SetFloat(FlipYID, flipY ? 1f : 0f);
-        stampMaterial.SetFloat(DebugStampAllID, debugStampAll ? 1f : 0f);
+        stampInstance.SetVectorArray(DentPosID, dentPos);
+        stampInstance.SetVectorArray(DentAxisID, dentAxis);
+        stampInstance.SetVectorArray(DentRightID, dentRight);
+        stampInstance.SetVectorArray(DentParamsID, dentParams);
+        stampInstance.SetInt(DentCountID, ActiveDentCount);
+        stampInstance.SetVectorArray(IslandPushID, islandPush);
+        stampInstance.SetInt(IslandCountID, Mathf.Min(generator.IslandCount, MAX_ISLANDS));
+        stampInstance.SetTexture(PrevTexID, src);
+        stampInstance.SetFloat(DecayID, CurrentDecay);
+        stampInstance.SetFloat(FlipYID, flipY ? 1f : 0f);
+        stampInstance.SetFloat(DebugStampAllID, debugStampAll ? 1f : 0f);
 
         cmd.Clear();
         cmd.SetRenderTarget(dst);
         // DrawMesh (not DrawRenderer) so we can substitute the points-topology mesh.
         // The matrix must be supplied explicitly here, and is also what makes
         // TransformWorldToObjectDir correct inside the stamp shader.
-        cmd.DrawMesh(generator.PointMesh, targetRenderer.transform.localToWorldMatrix, stampMaterial, 0, 0);
+        cmd.DrawMesh(generator.PointMesh, targetRenderer.transform.localToWorldMatrix, stampInstance, 0, 0);
         Graphics.ExecuteCommandBuffer(cmd);
 
         aIsCurrent = !aIsCurrent;
 
-        Shader.SetGlobalTexture(globalTextureName, dst);
+        characterMaterial.SetTexture(dentTextureID, dst);
+    }
+
+    /// <summary>
+    /// Narrows the scene-wide source list to the ones that can actually reach this
+    /// renderer. Without this every dented object would receive every dent in the scene.
+    /// </summary>
+    void CollectActiveSources()
+    {
+        active.Clear();
+
+        Bounds bounds = targetRenderer.bounds;
+
+        for (int i = 0; i < allSources.Count && active.Count < MAX_DENTS; i++)
+        {
+            var s = allSources[i];
+            if (s == null) continue;
+
+            if (filterSourcesByBounds)
+            {
+                // The stamp reaches 'outer' sideways and 'depth' backwards from its face,
+                // so a sphere of that radius around the face is a safe conservative test.
+                float reach = s.SafeOuterRadius + Mathf.Max(s.depth, 0f) + boundsPadding;
+                if (bounds.SqrDistance(s.transform.position) > reach * reach) continue;
+            }
+
+            active.Add(s);
+        }
     }
 
     void BuildDentArrays()
@@ -248,7 +310,7 @@ public class DentManager : MonoBehaviour
 
         for (int i = 0; i < count; i++)
         {
-            var s = sources[i];
+            var s = active[i];
             Vector3 p = s.transform.position;
             Vector3 axis = s.transform.forward;  // +Z is the press direction
             Vector3 right = s.transform.right;   // orients the Square cross-section
@@ -256,7 +318,7 @@ public class DentManager : MonoBehaviour
             dentPos[i]    = new Vector4(p.x, p.y, p.z, (float)s.shape);
             dentAxis[i]   = new Vector4(axis.x, axis.y, axis.z, Mathf.Max(s.depth, 0.0001f));
             dentRight[i]  = new Vector4(right.x, right.y, right.z, Mathf.Clamp01(s.flattenScale));
-            dentParams[i] = new Vector4(s.SafeInnerRadius, s.SafeOuterRadius, s.strength, 0f);
+            dentParams[i] = new Vector4(s.SafeInnerRadius, s.SafeOuterRadius, s.strength, s.spreadAmount);
         }
 
         for (int i = count; i < MAX_DENTS; i++)
@@ -327,10 +389,9 @@ public class DentManager : MonoBehaviour
         Vector3 bestDisp = Vector3.zero;
         float bestMagSq = 0f;
 
-        int count = ActiveDentCount;
-        for (int i = 0; i < count; i++)
+        for (int i = 0; i < active.Count; i++)
         {
-            var s = sources[i];
+            var s = active[i];
             Vector3 axis = s.transform.forward;
             Vector3 right = s.transform.right;
             Vector3 toPoint = worldPos - s.transform.position;
@@ -338,6 +399,12 @@ public class DentManager : MonoBehaviour
             float inner = s.SafeInnerRadius;
             float outer = s.SafeOuterRadius;
             float axial = Vector3.Dot(toPoint, axis);
+
+            // Component across the axis: the round cross-section distance, and the
+            // outward direction the spread pushes along.
+            Vector3 radialV = toPoint - axial * axis;
+            float radial = radialV.magnitude;
+            Vector3 outward = radial > 1e-5f ? radialV / radial : Vector3.zero;
 
             // Square uses a Chebyshev cross-section; the other two are round.
             float lat;
@@ -349,7 +416,7 @@ public class DentManager : MonoBehaviour
             }
             else
             {
-                lat = Vector3.ProjectOnPlane(toPoint, axis).magnitude;
+                lat = radial;
             }
 
             // Capsule is simply the punch with no flat face at all.
@@ -358,9 +425,15 @@ public class DentManager : MonoBehaviour
             float surfaceAxial = DentSurfaceAxial(lat, innerEff, outer);
 
             float penetration = Mathf.Clamp(surfaceAxial - axial, 0f, Mathf.Max(s.depth, 0.0001f));
-            float push = penetration * (1f - Mathf.Clamp01(s.flattenScale)) * s.strength;
+            float push = penetration * (1f - Mathf.Clamp01(s.flattenScale));
 
-            Vector3 disp = axis * push;
+            // Sideways spread, peaking around the inner radius.
+            float peak = Mathf.Max(innerEff, outer * 0.15f);
+            float rampIn = SmoothStep01(0f, peak, lat);
+            float rampOut = 1f - SmoothStep01(peak, outer, lat);
+            float bulge = push * s.spreadAmount * rampIn * rampOut;
+
+            Vector3 disp = (axis * push + outward * bulge) * s.strength;
             float magSq = disp.sqrMagnitude;
             if (magSq > bestMagSq)
             {
@@ -381,6 +454,13 @@ public class DentManager : MonoBehaviour
         float r = Mathf.Max(outer - inner, 1e-5f);
         float d = lat - inner;
         return -(r - Mathf.Sqrt(Mathf.Max(r * r - d * d, 0f)));
+    }
+
+    /// <summary>HLSL-style smoothstep. Unity's Mathf.SmoothStep does something different.</summary>
+    static float SmoothStep01(float edge0, float edge1, float x)
+    {
+        float t = Mathf.Clamp01((x - edge0) / Mathf.Max(edge1 - edge0, 1e-6f));
+        return t * t * (3f - 2f * t);
     }
 
     /// <summary>
@@ -412,13 +492,19 @@ public class DentManager : MonoBehaviour
 
     void Release()
     {
-        // Point the global at a known-zero texture BEFORE destroying the RTs, otherwise
-        // the character material keeps sampling a released/garbage buffer and appears
-        // fully deformed after exiting play mode.
-        Shader.SetGlobalTexture(globalTextureName, Texture2D.blackTexture);
+        // Leave the character material on a known-zero texture, otherwise it keeps
+        // sampling a released buffer and appears fully deformed after exiting play mode.
+        if (characterMaterial != null && characterMaterial.HasProperty(dentTextureID))
+            characterMaterial.SetTexture(dentTextureID, Texture2D.blackTexture);
 
         DestroyRT(ref rtA);
         DestroyRT(ref rtB);
+
+        if (stampInstance != null)
+        {
+            if (Application.isPlaying) Destroy(stampInstance); else DestroyImmediate(stampInstance);
+            stampInstance = null;
+        }
 
         if (cmd != null) { cmd.Release(); cmd = null; }
         initialised = false;

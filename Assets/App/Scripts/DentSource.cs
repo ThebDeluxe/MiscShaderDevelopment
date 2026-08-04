@@ -60,6 +60,12 @@ public class DentSource : MonoBehaviour
              "Dent depth is driven by geometry, not by this.")]
     [Range(0f, 1f)] public float strength = 1f;
 
+    [Tooltip("How much material spreads sideways around the contact, as a fraction of how " +
+             "far it was pushed in. 0 disables it.\n\n" +
+             "Nothing spreads at the very centre, it peaks around the inner radius, and " +
+             "tapers to nothing at the outer radius - like skin bulging around a press.")]
+    [Range(0f, 2f)] public float spreadAmount = 0.25f;
+
     /// <summary>Inner radius, guaranteed below outer (smoothstep inverts otherwise).</summary>
     public float SafeInnerRadius => Mathf.Min(innerRadius, outerRadius - 0.0001f);
     public float SafeOuterRadius => Mathf.Max(outerRadius, 0.0001f);
@@ -142,6 +148,44 @@ public class DentSource : MonoBehaviour
         Gizmos.DrawLine(p, tip);
         Gizmos.DrawLine(tip, tip - fwd * (outerRadius * 0.3f) + transform.right * (outerRadius * 0.15f));
         Gizmos.DrawLine(tip, tip - fwd * (outerRadius * 0.3f) - transform.right * (outerRadius * 0.15f));
+
+        DrawSpreadArrows(p, fwd);
+    }
+
+    /// <summary>
+    /// Arrows radiating outward from the inner radius, sized by spreadAmount, so the
+    /// sideways component is visible rather than something you have to infer.
+    /// </summary>
+    void DrawSpreadArrows(Vector3 p, Vector3 fwd)
+    {
+        if (spreadAmount <= 0.001f) return;
+
+        const int arrowCount = 8;
+        float ringRadius = Mathf.Max(innerRadius, outerRadius * 0.15f);
+        float length = spreadAmount * outerRadius * 0.6f;
+        float head = length * 0.3f;
+
+        Gizmos.color = new Color(0.4f, 1f, 0.5f, 0.9f);
+
+        for (int i = 0; i < arrowCount; i++)
+        {
+            float angle = (360f / arrowCount) * i;
+            Vector3 dir = Quaternion.AngleAxis(angle, fwd) * transform.right;
+
+            Vector3 start = p + dir * ringRadius;
+            Vector3 end = start + dir * length;
+
+            Gizmos.DrawLine(start, end);
+            Gizmos.DrawLine(end, end - dir * head + fwd * head * 0.5f);
+            Gizmos.DrawLine(end, end - dir * head - fwd * head * 0.5f);
+        }
+
+#if UNITY_EDITOR
+        Handles.color = new Color(0.4f, 1f, 0.5f, 1f);
+        Vector3 labelDir = transform.right;
+        Handles.Label(p + labelDir * (ringRadius + length * 1.2f),
+                      $"spread {spreadAmount:0.00}");
+#endif
     }
 
     void DrawSquare(Vector3 centre, float halfWidth)

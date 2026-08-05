@@ -69,6 +69,7 @@ public class SquashStretch : MonoBehaviour
     static readonly int PivotID  = Shader.PropertyToID(PivotProperty);
 
     Material material;
+    Transform rendererTransform;
 
     float lastHeight;
     float springValue;      // signed: positive stretches vertically, negative squashes
@@ -91,6 +92,11 @@ public class SquashStretch : MonoBehaviour
 
         // Same instance DentManager uses - the first access creates it, later ones reuse it.
         material = targetRenderer.material;
+
+        // The shader runs in the RENDERER's object space, which on a rolling character is a
+        // different transform from this one. Converting against the wrong basis is what
+        // makes the squash appear to spin with the mesh.
+        rendererTransform = targetRenderer.transform;
 
         if (!material.HasProperty(AxisID) || !material.HasProperty(AmountID))
         {
@@ -132,13 +138,18 @@ public class SquashStretch : MonoBehaviour
 
     void Push()
     {
-        // The shader works in object space, so world up has to be converted. Doing it every
-        // frame means a tumbling object still squashes vertically rather than with its mesh.
-        Vector3 axisOS = transform.InverseTransformDirection(Vector3.up);
+        // World up expressed in the renderer's object space. Because the shader then
+        // transforms the result by that same object matrix, scaling along this axis is
+        // exactly scaling along world up - so a rolling ball still squashes vertically.
+        Vector3 axisOS = rendererTransform.InverseTransformDirection(Vector3.up);
+
+        // The pivot is authored relative to THIS transform, so it has to make the same trip.
+        Vector3 pivotWS = transform.TransformPoint(pivotLocal);
+        Vector3 pivotOS = rendererTransform.InverseTransformPoint(pivotWS);
 
         material.SetVector(AxisID, axisOS);
         material.SetFloat(AmountID, springValue);
-        material.SetVector(PivotID, pivotLocal);
+        material.SetVector(PivotID, pivotOS);
     }
 
     void OnDisable()

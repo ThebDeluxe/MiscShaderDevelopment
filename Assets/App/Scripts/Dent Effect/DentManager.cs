@@ -316,7 +316,7 @@ public class DentManager : MonoBehaviour
             {
                 // The stamp reaches 'outer' sideways and 'depth' backwards from its face,
                 // so a sphere of that radius around the face is a safe conservative test.
-                float reach = s.SafeOuterRadius + Mathf.Max(s.depth, 0f) + boundsPadding;
+                float reach = s.LateralReach + Mathf.Max(s.depth, 0f) + boundsPadding;
                 if (bounds.SqrDistance(s.transform.position) > reach * reach) continue;
             }
 
@@ -338,10 +338,17 @@ public class DentManager : MonoBehaviour
             dentPos[i]    = new Vector4(p.x, p.y, p.z, (float)s.shape);
             dentAxis[i]   = new Vector4(axis.x, axis.y, axis.z, Mathf.Max(s.depth, 0.0001f));
             dentRight[i]  = new Vector4(right.x, right.y, right.z, Mathf.Clamp01(s.flattenScale));
-            dentParams[i] = new Vector4(s.SafeInnerRadius, s.SafeOuterRadius, s.strength, s.EffectiveSpread);
+            // Plane has no rim fillet and no spread, so its params slots carry its second
+            // rectangle extent and its edge softness instead.
+            float paramW = s.shape == DentShape.Plane ? s.planeEdgeSoftness : s.EffectiveSpread;
+            dentParams[i] = new Vector4(s.SafeInnerRadius, s.SafeOuterRadius, s.strength, paramW);
             dentBulge[i]  = new Vector4(s.rimBulge, Mathf.Max(s.bulgeReach, 1f),
                                         Mathf.Clamp01(s.bulgeNormalBias), DriverFor(i));
-            dentDecay[i]  = new Vector4(Mathf.Max(s.decayMultiplier, 0f), 0f, 0f, 0f);
+            // Plane repurposes the spare decay slots to place its rectangle relative to
+            // the source, so the source can stay under the character.
+            dentDecay[i] = s.shape == DentShape.Plane
+                ? new Vector4(Mathf.Max(s.decayMultiplier, 0f), s.planeOffset.x, s.planeOffset.y, 0f)
+                : new Vector4(Mathf.Max(s.decayMultiplier, 0f), 0f, 0f, 0f);
 
             // Fed back purely so the Plane gizmo can draw its real splay height.
             s.lastPressDepth = DriverFor(i);
@@ -496,8 +503,11 @@ public class DentManager : MonoBehaviour
 
     Vector3 EvaluateDentWorld(Vector3 worldPos, Vector3 worldNormal, out float decayMul)
     {
-        Vector3 bestDisp = Vector3.zero;
-        float bestMagSq = 0f;
+        // Press is accumulated, bulge is not - see the combination notes further down.
+        Vector3 pressAccum = Vector3.zero;
+        Vector3 bestExtras = Vector3.zero;
+        float bestExtrasMagSq = 0f;
+        float deepestPress = 0f;
         decayMul = 1f;
 
         for (int i = 0; i < active.Count; i++)
@@ -533,13 +543,36 @@ public class DentManager : MonoBehaviour
             // Capsule has no flat face; Plane is flat right to its edge.
             float innerEff = inner;
 
-            // A Plane is flat right to its edge - no rim fillet.
-            float surfaceAxial = s.shape == DentShape.Plane
-                ? (lat <= outer ? 0f : -1e9f)
-                : DentSurfaceAxial(lat, innerEff, outer);
+            // A Plane is a rectangle with independent half sizes, clamped to the collider
+            // face that produced it. Without that it runs past a ledge and keeps flattening
+            // the part of the mesh hanging over the drop.
+            float surfaceAxial;
+            float planeEdge = 1f;
+
+            if (s.shape == DentShape.Plane)
+            {
+                Vector3 planeUp = Vector3.Cross(axis, right);
+
+                float lx = Mathf.Abs(Vector3.Dot(toPoint, right) - s.planeOffset.x);
+                float ly = Mathf.Abs(Vector3.Dot(toPoint, planeUp) - s.planeOffset.y);
+
+                float halfX = inner;
+                float halfY = outer;
+
+                surfaceAxial = (lx <= halfX && ly <= halfY) ? 0f : -1e9f;
+
+                float soft = Mathf.Max(Mathf.Clamp01(s.planeEdgeSoftness), 0.001f);
+                float sx = 1f - SmoothStep01(halfX * (1f - soft), halfX, lx);
+                float sy = 1f - SmoothStep01(halfY * (1f - soft), halfY, ly);
+                planeEdge = sx * sy;
+            }
+            else
+            {
+                surfaceAxial = DentSurfaceAxial(lat, innerEff, outer);
+            }
 
             float penetration = Mathf.Clamp(surfaceAxial - axial, 0f, Mathf.Max(s.depth, 0.0001f));
-            float push = penetration * (1f - Mathf.Clamp01(s.flattenScale));
+            float push = penetration * (1f - Mathf.Clamp01(s.flattenScale)) * planeEdge;
 
             // Sideways spread, inside the contact, peaking around the inner radius.
             float peak = Mathf.Max(innerEff, outer * 0.15f);
@@ -577,17 +610,36 @@ public class DentManager : MonoBehaviour
                 if (rimDir.sqrMagnitude > 1e-8f) rimDir.Normalize();
             }
 
-            Vector3 disp = (axis * push + outward * bulge + rimDir * rim) * s.strength;
-            float magSq = disp.sqrMagnitude;
-            if (magSq > bestMagSq)
+            // The PRESS is a constraint: "do not be inside this stamp". In a corner two of
+            // them must BOTH be satisfied, so taking whichever is strongest would push a
+            // vertex out of the wall while leaving it under the floor, and no fold appears.
+            //
+            // Plain summing is wrong too - two parallel stamps would stack into a
+            // double-deep dent. Adding only the part not already covered along this axis
+            // gives both behaviours from one rule.
+            float wanted = push * s.strength;
+            float already = Vector3.Dot(pressAccum, axis);
+            float extra = Mathf.Max(wanted - already, 0f);
+
+            pressAccum += axis * extra;
+
+            // The BULGE is not a constraint, just displaced material, so strongest wins.
+            Vector3 extras = (outward * bulge + rimDir * rim) * s.strength;
+            float extrasMagSq = extras.sqrMagnitude;
+            if (extrasMagSq > bestExtrasMagSq)
             {
-                bestMagSq = magSq;
-                bestDisp = disp;
+                bestExtrasMagSq = extrasMagSq;
+                bestExtras = extras;
+            }
+
+            if (extra > deepestPress)
+            {
+                deepestPress = extra;
                 decayMul = Mathf.Max(s.decayMultiplier, 0f);
             }
         }
 
-        return bestDisp;
+        return pressAccum + bestExtras;
     }
 
     /// <summary>Mirror of DentSurfaceAxial in DentStamp.hlsl.</summary>

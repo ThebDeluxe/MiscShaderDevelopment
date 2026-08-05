@@ -78,14 +78,14 @@ public class DentSourceEditor : Editor
                 EditorGUILayout.HelpBox(
                     "A hard surface the object rests on, not a punch. Everything below it " +
                     "conforms to it and the displaced volume splays sideways.\n\n" +
-                    "Point +Z into the object it supports.",
+                    "Point +Z into the object it supports. The two sizes are independent " +
+                    "rectangle extents, so the surface can be clamped to a real collider face.",
                     MessageType.None);
 
-                // One consolidated dimension: a plane has no rim to fillet.
+                EditorGUILayout.PropertyField(innerRadius, new GUIContent(
+                    "Size X", "Half extent along the source's local +X."));
                 EditorGUILayout.PropertyField(outerRadius, new GUIContent(
-                    "Size",
-                    "Half size of the surface. Make it comfortably larger than the object " +
-                    "resting on it."));
+                    "Size Y", "Half extent along the source's local +Y."));
             }
             else
             {

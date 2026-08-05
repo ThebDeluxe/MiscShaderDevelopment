@@ -29,9 +29,16 @@
 //   _DentAxis[i]   : xyz = world press axis (+Z),               w = depth
 //   _DentRight[i]  : xyz = world right (+X, orients Square),    w = flatten scale
 //   _DentParams[i] : x = inner radius, y = outer radius, z = strength, w = spread amount
+//                    For PLANE: x = half extent along +X, y = half extent along +Y,
+//                    w = edge softness. A plane has no rim fillet, so the inner radius
+//                    slot carries its second extent instead.
 //   _DentBulge[i]  : x = rim bulge amount, y = bulge reach, z = normal bias,
 //                    w = bulge driver (deepest penetration, already clamped by the CPU)
 //   _DentDecay[i]  : x = decay multiplier for dents this stamp creates
+//                    For PLANE: y, z = offset of the rectangle's centre from the source,
+//                    measured along the source's own +X and +Y. The source itself stays
+//                    under the character - it is what the splay radiates from and what
+//                    range checks measure - so the rectangle has to be placed separately.
 //   _IslandPush[j] : xyz = OBJECT space rigid push for island j, w = rigidity 0..1
 //
 // Shape ids: 0 = Capsule, 1 = Cylinder, 2 = Square, 3 = Plane.
@@ -155,8 +162,11 @@ float DentPress_Axial(float axial, float surfaceAxial, float depth, float flatte
 // DecayMul comes from whichever stamp won, so the result carries its own fade rate.
 float3 EvaluateDentWorld(float3 WorldPos, float3 WorldNormal, out float DecayMul)
 {
-    float3 bestDisp  = float3(0, 0, 0);
-    float  bestMagSq = 0.0;
+    // Press is accumulated, bulge is not - see the combination notes further down.
+    float3 pressAccum      = float3(0, 0, 0);
+    float3 bestExtras      = float3(0, 0, 0);
+    float  bestExtrasMagSq = 0.0;
+    float  deepestPress    = 0.0;
     DecayMul = 1.0;
 
     for (int i = 0; i < _DentCount; i++)
@@ -195,12 +205,42 @@ float3 EvaluateDentWorld(float3 WorldPos, float3 WorldNormal, out float DecayMul
         // Capsule has no flat face; Plane is flat right to its edge. Both mean no inner radius.
         float innerEff = (shapeId < 0.5 || isPlane) ? 0.0 : inner;
 
-        // A Plane is flat right to its edge - no rim fillet. 'outer' is its half size.
-        float surfaceAxial = isPlane
-            ? ((lat <= outer) ? 0.0 : -1e9)
-            : DentSurfaceAxial(lat, innerEff, outer);
+        // A Plane is a rectangle with independent half sizes, so it can be clamped to the
+        // actual face of the collider that produced it. Without that the surface runs past
+        // a ledge and keeps flattening the part of the mesh hanging over the drop.
+        float surfaceAxial;
+        float planeEdge = 1.0;
 
-        float push = DentPress_Axial(axial, surfaceAxial, depth, flatten);
+        if (isPlane)
+        {
+            float3 planeUp = cross(axis, right);
+
+            // The rectangle is placed relative to the source rather than centred on it, so
+            // the source can stay under the character while the surface is clamped to the
+            // collider face that produced it.
+            float2 planeOffset = float2(_DentDecay[i].y, _DentDecay[i].z);
+
+            float lx = abs(dot(toPoint, right) - planeOffset.x);
+            float ly = abs(dot(toPoint, planeUp) - planeOffset.y);
+
+            float halfX = inner;   // no rim fillet on a plane, so this slot is the 2nd extent
+            float halfY = outer;
+
+            surfaceAxial = (lx <= halfX && ly <= halfY) ? 0.0 : -1e9;
+
+            // Soften the last fraction of each edge, so the mesh bends over the lip instead
+            // of shearing off along a hard line.
+            float soft = max(saturate(_DentParams[i].w), 0.001);
+            float sx = 1.0 - smoothstep(halfX * (1.0 - soft), halfX, lx);
+            float sy = 1.0 - smoothstep(halfY * (1.0 - soft), halfY, ly);
+            planeEdge = sx * sy;
+        }
+        else
+        {
+            surfaceAxial = DentSurfaceAxial(lat, innerEff, outer);
+        }
+
+        float push = DentPress_Axial(axial, surfaceAxial, depth, flatten) * planeEdge;
 
         // --- sideways spread, inside the contact ---
         // Rises from the centre, peaks around the inner radius, gone by the outer radius.
@@ -238,20 +278,40 @@ float3 EvaluateDentWorld(float3 WorldPos, float3 WorldNormal, out float DecayMul
             rimDir = normalize(lerp(-axis, WorldNormal, rimBias) + 1e-6);
         }
 
-        float3 disp = (axis * push + outward * bulge + rimDir * rim) * strength;
+        // --- combine ---
+        // The PRESS is a constraint: "do not be inside this stamp". In a corner two of them
+        // must BOTH be satisfied, so taking whichever is strongest would push a vertex out
+        // of the wall while leaving it under the floor, and no fold appears.
+        //
+        // Plain summing is wrong too - two parallel stamps would stack into a double-deep
+        // dent. Adding only the part not already covered along this axis gives both: a
+        // parallel stamp contributes nothing extra, while a perpendicular one contributes
+        // in full, which is exactly a right-angle fold.
+        float wanted  = push * strength;
+        float already = dot(pressAccum, axis);
+        float extra   = max(wanted - already, 0.0);
 
-        // Strongest source wins rather than summing, so overlapping stamps of the
-        // same depth read as one dent instead of a doubly deep one.
-        float magSq = dot(disp, disp);
-        if (magSq > bestMagSq)
+        pressAccum += axis * extra;
+
+        // The BULGE is not a constraint, just displaced material, so strongest still wins
+        // there rather than piling up once per surface.
+        float3 extras = (outward * bulge + rimDir * rim) * strength;
+        float extrasMagSq = dot(extras, extras);
+        if (extrasMagSq > bestExtrasMagSq)
         {
-            bestMagSq = magSq;
-            bestDisp  = disp;
-            DecayMul  = max(_DentDecay[i].x, 0.0);
+            bestExtrasMagSq = extrasMagSq;
+            bestExtras = extras;
+        }
+
+        // Fade rate comes from whichever stamp actually pressed this vertex hardest.
+        if (extra > deepestPress)
+        {
+            deepestPress = extra;
+            DecayMul = max(_DentDecay[i].x, 0.0);
         }
     }
 
-    return bestDisp;
+    return pressAccum + bestExtras;
 }
 
 // --------------------------------------------------------------------

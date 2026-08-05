@@ -101,19 +101,37 @@ public class DentSource : MonoBehaviour
              "0 = no clamp.")]
     public float bulgeClamp = 0.25f;
 
+    [Tooltip("Plane only. Offset of the rectangle's centre from this transform, along the " +
+             "source's own +X and +Y.\n\n" +
+             "Lets the source sit under the character - which is what the splay radiates " +
+             "from - while the surface itself is clamped to a collider face that may be " +
+             "nowhere near centred on it.")]
+    public Vector2 planeOffset = Vector2.zero;
+
+    [Tooltip("How gently the press fades out at the edge of a Plane, as a fraction of its " +
+             "extent. Lets the mesh bend over a ledge instead of shearing off at a hard line.")]
+    [Range(0.01f, 0.9f)] public float planeEdgeSoftness = 0.2f;
+
     [Tooltip("Multiplier on DentManager's decay rate for dents this stamp creates.\n" +
              "1 = the manager's rate. Above 1 fades faster, below 1 lingers.\n" +
              "0 makes this stamp's dents permanent regardless of the manager.")]
     [Range(0f, 5f)] public float decayMultiplier = 1f;
 
     /// <summary>Inner radius, guaranteed below outer (smoothstep inverts otherwise).
-    /// Capsule and Plane have no flat face, so it is zero for them.</summary>
+    /// Capsule has no flat face, so it is zero. Plane repurposes this slot as its second
+    /// half extent, so it passes through untouched.</summary>
     public float SafeInnerRadius =>
-        shape == DentShape.Capsule || shape == DentShape.Plane
-            ? 0f
-            : Mathf.Min(innerRadius, outerRadius - 0.0001f);
+        shape == DentShape.Capsule ? 0f
+        : shape == DentShape.Plane ? Mathf.Max(innerRadius, 0.0001f)
+        : Mathf.Min(innerRadius, outerRadius - 0.0001f);
 
     public float SafeOuterRadius => Mathf.Max(outerRadius, 0.0001f);
+
+    /// <summary>Largest lateral reach from the source, used for range checks.</summary>
+    public float LateralReach => shape == DentShape.Plane
+        ? Mathf.Max(Mathf.Abs(planeOffset.x) + SafeInnerRadius,
+                    Mathf.Abs(planeOffset.y) + SafeOuterRadius)
+        : SafeOuterRadius;
 
     /// <summary>Sideways spread inside the contact. Meaningless for a Plane, whose
     /// displaced volume is handled by the splay instead.</summary>
@@ -132,7 +150,14 @@ public class DentSource : MonoBehaviour
     void OnValidate()
     {
         innerRadius = Mathf.Max(0f, innerRadius);
-        outerRadius = Mathf.Max(innerRadius + 0.0001f, outerRadius);
+
+        // A Plane's two radii are independent rectangle extents, not a fillet, so the
+        // usual inner-below-outer rule does not apply.
+        if (shape != DentShape.Plane)
+            outerRadius = Mathf.Max(innerRadius + 0.0001f, outerRadius);
+        else
+            outerRadius = Mathf.Max(0.0001f, outerRadius);
+
         depth       = Mathf.Max(0.0001f, depth);
         bulgeClamp  = Mathf.Max(0f, bulgeClamp);
     }
@@ -199,9 +224,10 @@ public class DentSource : MonoBehaviour
                 break;
 
             case DentShape.Plane:
-                // Just the surface itself: no body, no rim, no inner radius.
+                // Rectangle with independent extents, offset to match the collider face.
                 Gizmos.color = outerCol;
-                DrawSquare(p, outerRadius);
+                DrawRect(p + transform.right * planeOffset.x + transform.up * planeOffset.y,
+                         innerRadius, outerRadius);
                 break;
         }
 
@@ -299,10 +325,12 @@ public class DentSource : MonoBehaviour
 #endif
     }
 
-    void DrawSquare(Vector3 centre, float halfWidth)
+    void DrawSquare(Vector3 centre, float halfWidth) => DrawRect(centre, halfWidth, halfWidth);
+
+    void DrawRect(Vector3 centre, float halfX, float halfY)
     {
-        Vector3 r = transform.right * halfWidth;
-        Vector3 u = transform.up * halfWidth;
+        Vector3 r = transform.right * halfX;
+        Vector3 u = transform.up * halfY;
 
         Vector3 a = centre + r + u;
         Vector3 b = centre + r - u;

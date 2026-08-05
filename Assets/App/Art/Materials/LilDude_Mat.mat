@@ -43,8 +43,10 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
+    - _Clay_Tiling: 0.25
     - _Fresnel_Amount: 0.15
     - _Use_Vertex_Colour: 1
+    - _Vertex_Offset_Amount: 0.1
     m_Colors: []
   m_BuildTextureStacks: []
   m_AllowLocking: 1

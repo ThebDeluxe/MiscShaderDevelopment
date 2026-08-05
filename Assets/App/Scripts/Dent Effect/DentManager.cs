@@ -592,7 +592,7 @@ public class DentManager : MonoBehaviour
                 float height = Mathf.Max(driver * Mathf.Max(s.bulgeReach, 1f), 1e-5f);
                 float above = axial > 0f ? 1f - SmoothStep01(0f, height, axial) : 0f;
 
-                rim = driver * s.rimBulge * above;
+                rim = driver * s.rimBulge * above * planeEdge;
                 rimDir = outward;
             }
             else

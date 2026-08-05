@@ -121,6 +121,9 @@ public class DentContactSource : MonoBehaviour
     readonly List<(Vector3 pos, bool solid)> probeLog = new List<(Vector3, bool)>(64);
     float nextLogTime;
 
+    const int MaxOverlaps = 16;
+    readonly Collider[] overlaps = new Collider[MaxOverlaps];
+
     readonly List<Contact> contacts = new List<Contact>(16);
     readonly List<Tracked> tracked = new List<Tracked>(8);
     readonly List<DentSource> pool = new List<DentSource>();
@@ -132,7 +135,12 @@ public class DentContactSource : MonoBehaviour
     {
         public Vector3 point;      // on the real surface
         public Vector3 pressAxis;  // from the surface INTO the character
+        public Vector3 right;      // in-plane basis the extents are measured along
         public float sink;         // how far the visible mesh overlaps the surface
+
+        // Signed extents relative to 'point'. Exact for a box, probed otherwise.
+        public float minX, maxX, minY, maxY;
+        public bool hasExtents;
     }
 
     /// <summary>
@@ -147,6 +155,7 @@ public class DentContactSource : MonoBehaviour
     {
         public Vector3 point;
         public Vector3 pressAxis;
+        public Vector3 right;
         public float sink;
         public float weight;       // 0..1, fades in and out
 
@@ -212,22 +221,161 @@ public class DentContactSource : MonoBehaviour
         Vector3 centre = transform.TransformPoint(centreOffset);
         float mergeDot = Mathf.Cos(mergeAngle * Mathf.Deg2Rad);
 
+        int count = Physics.OverlapSphereNonAlloc(centre, visualRadius, overlaps,
+                                                  surfaceMask, QueryTriggerInteraction.Ignore);
+
+        bool needsRaycastPass = false;
+
+        for (int i = 0; i < count; i++)
+        {
+            Collider col = overlaps[i];
+            if (col == null) continue;
+            if (col.transform.IsChildOf(transform)) continue;
+
+            if (col is BoxCollider box) ProbeBox(box, centre, mergeDot);
+            else needsRaycastPass = true;
+        }
+
+        // Rays are only needed for geometry that cannot be solved directly.
+        if (needsRaycastPass) ProbeByRays(centre, mergeDot);
+
+        contacts.Sort((a, b) => b.sink.CompareTo(a.sink));
+    }
+
+    /// <summary>
+    /// Sphere against box, solved rather than sampled.
+    ///
+    /// Every face the sphere overlaps becomes its own plane, with its true normal and its
+    /// exact rectangle - so a step gives you its top face AND its riser, a corner gives you
+    /// both walls, and a ledge's extent is known without probing for it. Rays cast from the
+    /// character's centre cannot see a riser below a ledge at all, and the edge probes only
+    /// ever look downward, so between them that case was invisible.
+    ///
+    /// Costs a few dot products per box, against dozens of raycasts.
+    /// </summary>
+    void ProbeBox(BoxCollider box, Vector3 centre, float mergeDot)
+    {
+        Transform bt = box.transform;
+        Vector3 scale = bt.lossyScale;
+
+        Vector3 half = new Vector3(Mathf.Abs(box.size.x * scale.x),
+                                   Mathf.Abs(box.size.y * scale.y),
+                                   Mathf.Abs(box.size.z * scale.z)) * 0.5f;
+
+        // Sphere centre in the box's own frame, relative to its centre.
+        Vector3 p = bt.InverseTransformPoint(centre) - box.center;
+        p = new Vector3(p.x * scale.x, p.y * scale.y, p.z * scale.z);
+
+        Vector3[] axes = { bt.right, bt.up, bt.forward };
+
+        // A face is only a contact if the sphere's centre lies OUTSIDE its plane. Picking
+        // the nearest face per axis regardless is what put a plane inside the geometry:
+        // rolling up beside a short step sits level with its centre, so the top face gets
+        // chosen with the centre buried under it, and the character is pressed upward from
+        // inside the box.
+        bool centreOutside = Mathf.Abs(p.x) > half.x
+                          || Mathf.Abs(p.y) > half.y
+                          || Mathf.Abs(p.z) > half.z;
+
+        // Fully swallowed by the box - no face is "outside", so fall back to the nearest one.
+        int nearestAxis = 0;
+        if (!centreOutside)
+        {
+            float nearest = float.MinValue;
+            for (int a = 0; a < 3; a++)
+            {
+                float d = Mathf.Abs(p[a]) - half[a];
+                if (d > nearest) { nearest = d; nearestAxis = a; }
+            }
+        }
+
+        for (int axis = 0; axis < 3; axis++)
+        {
+            int j = (axis + 1) % 3;
+            int k = (axis + 2) % 3;
+
+            float sign = p[axis] >= 0f ? 1f : -1f;
+
+            // Distance from the sphere centre out to this face plane. Negative means the
+            // centre is inside the box past it.
+            float distance = sign * p[axis] - half[axis];
+
+            if (centreOutside)
+            {
+                if (distance <= 0f) continue;   // centre is not outside this face
+            }
+            else if (axis != nearestAxis)
+            {
+                continue;
+            }
+
+            float sink = visualRadius - distance;
+            if (sink < minSink) continue;
+
+            // Must actually be over the face, not off its side.
+            if (Mathf.Abs(p[j]) > half[j] + visualRadius) continue;
+            if (Mathf.Abs(p[k]) > half[k] + visualRadius) continue;
+
+            Vector3 normal = axes[axis] * sign;
+
+            // Build the basis exactly as Quaternion.LookRotation will, which defines
+            // right = cross(up, forward). Deriving the extents in any other frame flips
+            // their asymmetry and hangs the rectangle off the wrong edge.
+            Vector3 up = axes[j];
+            Vector3 right = Vector3.Cross(up, normal);
+
+            // Which way round the box's own axis ended up pointing in that basis.
+            float rightSign = Vector3.Dot(right, axes[k]) >= 0f ? 1f : -1f;
+
+            float alongRight = p[k] * rightSign;
+            float alongUp = p[j];
+
+            // The contact plane sits at the face, directly beneath the character.
+            Vector3 point = centre - normal * distance;
+
+            // The face rectangle, relative to that point. Exact, no probing.
+            var contact = new Contact
+            {
+                point = point,
+                pressAxis = normal,
+                right = right,
+                sink = sink,
+                minX = -half[k] - alongRight,
+                maxX = half[k] - alongRight,
+                minY = -half[j] - alongUp,
+                maxY = half[j] - alongUp,
+                hasExtents = true
+            };
+
+            MergeOrAdd(contact, mergeDot);
+        }
+    }
+
+    /// <summary>Fallback sampling for geometry that cannot be solved directly.</summary>
+    void ProbeByRays(Vector3 centre, float mergeDot)
+    {
         for (int i = 0; i < directions.Length; i++)
         {
             if (!Physics.Raycast(centre, directions[i], out RaycastHit hit, visualRadius,
                                  surfaceMask, QueryTriggerInteraction.Ignore))
                 continue;
 
+            // Boxes were already handled exactly.
+            if (hit.collider is BoxCollider) continue;
+
             float sink = visualRadius - hit.distance;
             if (sink < minSink) continue;
 
             // hit.normal comes off the triangle and points back toward the ray origin, which
             // is exactly the Plane stamp's press axis: from the surface into the character.
-            MergeOrAdd(new Contact { point = hit.point, pressAxis = hit.normal, sink = sink },
-                       mergeDot);
+            MergeOrAdd(new Contact
+            {
+                point = hit.point,
+                pressAxis = hit.normal,
+                sink = sink,
+                hasExtents = false
+            }, mergeDot);
         }
-
-        contacts.Sort((a, b) => b.sink.CompareTo(a.sink));
     }
 
     void MergeOrAdd(Contact c, float mergeDot)
@@ -279,6 +427,7 @@ public class DentContactSource : MonoBehaviour
                 {
                     point = contact.point,
                     pressAxis = contact.pressAxis,
+                    right = contact.right,
                     sink = contact.sink,
                     weight = 0f
                 };
@@ -291,10 +440,13 @@ public class DentContactSource : MonoBehaviour
                 match.point = Vector3.Lerp(match.point, contact.point, k);
                 match.pressAxis = Vector3.Slerp(match.pressAxis, contact.pressAxis, k).normalized;
                 match.sink = Mathf.Lerp(match.sink, contact.sink, k);
+
+                if (contact.hasExtents)
+                    match.right = Vector3.Slerp(match.right, contact.right, k).normalized;
             }
 
             match.seenThisFrame = true;
-            MeasureExtents(match, cap, dt);
+            UpdateExtents(match, contact, cap, dt);
         }
 
         for (int t = tracked.Count - 1; t >= 0; t--)
@@ -316,31 +468,40 @@ public class DentContactSource : MonoBehaviour
     }
 
     /// <summary>
-    /// Measures how far the surface reaches in each of the plane's four directions, by
-    /// binary searching for the point where it stops being underneath.
-    ///
-    /// Deriving this from the collider only works for a box. On a concave mesh the face is
-    /// a strip of triangles with no single extent, and the collider's bounds cover the whole
-    /// object - which is why an unclamped plane keeps flattening the mesh out over a ledge.
+    /// Brings a surface's extents up to date, either from the exact figures a box provided
+    /// or by measuring them.
     /// </summary>
-    void MeasureExtents(Tracked s, float cap, float dt)
+    void UpdateExtents(Tracked s, Contact contact, float cap, float dt)
     {
-        if (!clampToEdges)
+        float minX, maxX, minY, maxY;
+
+        if (contact.hasExtents)
         {
-            s.minX = -cap; s.maxX = cap;
-            s.minY = -cap; s.maxY = cap;
-            s.measured = true;
-            return;
+            // A box knows its own face, so there is nothing to search for.
+            minX = Mathf.Max(contact.minX, -cap);
+            maxX = Mathf.Min(contact.maxX, cap);
+            minY = Mathf.Max(contact.minY, -cap);
+            maxY = Mathf.Min(contact.maxY, cap);
         }
+        else if (clampToEdges)
+        {
+            // Nothing analytic is possible on a concave mesh, so walk outward and find
+            // where the surface stops being underneath.
+            if (s.right.sqrMagnitude < 0.5f)
+                s.right = LookAlong(s.pressAxis) * Vector3.right;
 
-        Quaternion basis = LookAlong(s.pressAxis);
-        Vector3 right = basis * Vector3.right;
-        Vector3 up = basis * Vector3.up;
+            Vector3 up = Vector3.Cross(s.pressAxis, s.right).normalized;
 
-        float maxX = ProbeEdge(s, right, cap);
-        float minX = -ProbeEdge(s, -right, cap);
-        float maxY = ProbeEdge(s, up, cap);
-        float minY = -ProbeEdge(s, -up, cap);
+            maxX = ProbeEdge(s, s.right, cap);
+            minX = -ProbeEdge(s, -s.right, cap);
+            maxY = ProbeEdge(s, up, cap);
+            minY = -ProbeEdge(s, -up, cap);
+        }
+        else
+        {
+            minX = -cap; maxX = cap;
+            minY = -cap; maxY = cap;
+        }
 
         if (!s.measured)
         {
@@ -350,7 +511,7 @@ public class DentContactSource : MonoBehaviour
             return;
         }
 
-        // Smoothed, because the binary search lands on slightly different answers frame to
+        // Smoothed, because a probed edge lands on slightly different answers frame to
         // frame and an unsmoothed edge visibly shimmers.
         float k = surfaceSmoothing > 0f ? 1f - Mathf.Exp(-dt / surfaceSmoothing) : 1f;
 
@@ -430,7 +591,16 @@ public class DentContactSource : MonoBehaviour
             // and DentManager's range check measures from it. The rectangle is placed
             // separately via an offset, so it can still stop at the measured edges.
             Vector3 sourcePos = centre - s.pressAxis * Vector3.Dot(centre - s.point, s.pressAxis);
-            src.transform.SetPositionAndRotation(sourcePos, LookAlong(s.pressAxis));
+
+            // Keep the plane's basis aligned to whatever the extents were measured in,
+            // otherwise an exact box rectangle would be applied along the wrong axes.
+            Vector3 basisRight = s.right.sqrMagnitude > 0.5f
+                ? s.right
+                : LookAlong(s.pressAxis) * Vector3.right;
+
+            Vector3 basisUp = Vector3.Cross(s.pressAxis, basisRight).normalized;
+            src.transform.SetPositionAndRotation(sourcePos,
+                                                 Quaternion.LookRotation(s.pressAxis, basisUp));
 
             // Extents were measured about the contact point, so shift them onto the source.
             Vector3 shift = s.point - sourcePos;
@@ -514,9 +684,10 @@ public class DentContactSource : MonoBehaviour
             Gizmos.DrawLine(s.point, s.point + s.pressAxis * 0.3f);
 
             // The measured rectangle, so it is obvious where the surface is believed to end.
-            Quaternion basis = LookAlong(s.pressAxis);
-            Vector3 right = basis * Vector3.right;
-            Vector3 up = basis * Vector3.up;
+            Vector3 right = s.right.sqrMagnitude > 0.5f
+                ? s.right
+                : LookAlong(s.pressAxis) * Vector3.right;
+            Vector3 up = Vector3.Cross(s.pressAxis, right).normalized;
 
             Vector3 a = s.point + right * s.maxX + up * s.maxY;
             Vector3 b = s.point + right * s.maxX + up * s.minY;

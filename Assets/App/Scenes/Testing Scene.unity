@@ -590,7 +590,7 @@ MonoBehaviour:
   decayMultiplier: 3.75
   drawGizmos: 1
   drawEdgeProbes: 1
-  logExtents: 0
+  logExtents: 1
 --- !u!1 &268532159
 GameObject:
   m_ObjectHideFlags: 0

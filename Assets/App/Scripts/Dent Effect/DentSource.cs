@@ -262,13 +262,17 @@ public class DentSource : MonoBehaviour
         float pressDepth = measured ? lastPressDepth : outerRadius * 0.1f;
         float height = pressDepth * Mathf.Max(bulgeReach, 1f);
 
+        // Same rectangle and offset as the press, since the splay is bounded by it. Drawing
+        // a plain square here reads as the surface reaching further than it does.
+        Vector3 rectCentre = p + transform.right * planeOffset.x + transform.up * planeOffset.y;
+
         Gizmos.color = new Color(0.4f, 1f, 0.5f, 0.8f);
-        DrawSquare(p + fwd * height, outerRadius);
-        DrawSquareRails(p, fwd * height, outerRadius);
+        DrawRect(rectCentre + fwd * height, innerRadius, outerRadius);
+        DrawRectRails(rectCentre, fwd * height, innerRadius, outerRadius);
 
 #if UNITY_EDITOR
         Handles.color = new Color(0.4f, 1f, 0.5f, 1f);
-        Handles.Label(p + fwd * height + transform.right * outerRadius,
+        Handles.Label(rectCentre + fwd * height + transform.right * innerRadius,
                       measured
                           ? $"splay {rimBulge:0.00}, height {height:0.000}"
                           : $"splay {rimBulge:0.00}, height x{bulgeReach:0.0} of press depth (estimated)");
@@ -344,9 +348,12 @@ public class DentSource : MonoBehaviour
     }
 
     void DrawSquareRails(Vector3 face, Vector3 back, float halfWidth)
+        => DrawRectRails(face, back, halfWidth, halfWidth);
+
+    void DrawRectRails(Vector3 face, Vector3 back, float halfX, float halfY)
     {
-        Vector3 r = transform.right * halfWidth;
-        Vector3 u = transform.up * halfWidth;
+        Vector3 r = transform.right * halfX;
+        Vector3 u = transform.up * halfY;
 
         Gizmos.DrawLine(face + r + u, face + back + r + u);
         Gizmos.DrawLine(face + r - u, face + back + r - u);

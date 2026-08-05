@@ -262,7 +262,10 @@ float3 EvaluateDentWorld(float3 WorldPos, float3 WorldNormal, out float DecayMul
             float height = max(driver * rimReach, 1e-5);
             float above  = (axial > 0.0) ? (1.0 - smoothstep(0.0, height, axial)) : 0.0;
 
-            rim    = driver * rimAmt * above;
+            // Bounded by the same rectangle as the press. Without this the splay keeps
+            // pushing outward past the end of a step or across a corner, where the surface
+            // producing it does not actually reach.
+            rim    = driver * rimAmt * above * planeEdge;
             rimDir = outward;
         }
         else

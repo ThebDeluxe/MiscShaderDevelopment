@@ -11,10 +11,15 @@ using UnityEngine;
 /// effect readable - a character that leans into every sideways step reads as wobbly
 /// rather than weighty.
 ///
-/// The feel comes from a spring, not from velocity directly. The target is driven by
-/// vertical SPEED, so rising and falling both stretch. Landing drops the target to zero
-/// and the under-damped spring overshoots past it, which reads as a squash and an elastic
-/// settle without any of that being scripted.
+/// The spring can be driven two ways:
+///   SetHold    - a sustained target, for things like crouching into a jump charge.
+///   AddImpulse - a kick to the spring's velocity, for instantaneous events like landing
+///                or launching. Impacts read better as impulses than as targets, because
+///                the overshoot and settle come out of the spring rather than needing to
+///                be animated.
+///
+/// Leave Auto From Motion off when something else (a character controller) is driving it,
+/// so the two do not fight over the same spring.
 /// </summary>
 [DefaultExecutionOrder(-50)]
 public class SquashStretch : MonoBehaviour
@@ -27,8 +32,11 @@ public class SquashStretch : MonoBehaviour
     public Transform motionSource;
 
     [Header("Response")]
-    [Tooltip("Stretch produced per unit of vertical speed. Higher means the object reacts " +
-             "to slower movement.")]
+    [Tooltip("Derive the spring target from vertical speed. Turn OFF when a controller is " +
+             "driving this through SetHold and AddImpulse.")]
+    public bool autoFromMotion = false;
+
+    [Tooltip("Stretch produced per unit of vertical speed. Auto mode only.")]
     public float velocityToStretch = 0.15f;
 
     [Tooltip("Hard cap on stretch and squash, so a fast fall or a teleport cannot tear the " +
@@ -44,15 +52,18 @@ public class SquashStretch : MonoBehaviour
              "more sharply on landing.")]
     public float stiffness = 120f;
 
-    [Tooltip("How quickly the bounce settles. Critical damping is 2 * sqrt(Stiffness) - at " +
-             "Stiffness 120 that is about 22, so anything well below that will visibly " +
-             "oscillate. Lower means a longer wobble.")]
+    [Tooltip("How quickly the bounce settles by default. Critical damping is " +
+             "2 * sqrt(Stiffness) - anything well below that will visibly oscillate. " +
+             "AddImpulse can override this per event.")]
     public float damping = 7f;
 
     [Header("Pivot")]
-    [Tooltip("Point the scaling happens around, in local space. For a character standing on " +
-             "the ground, put this at the feet so squashing does not sink them through the " +
-             "floor.")]
+    [Tooltip("Squash around the BOTTOM of this collider, so the character flattens down onto " +
+             "the ground instead of sinking through it. BallCharacterController assigns its " +
+             "inner collider here automatically.")]
+    public Collider pivotCollider;
+
+    [Tooltip("Fallback pivot in local space, used only when no Pivot Collider is set.")]
     public Vector3 pivotLocal = Vector3.zero;
 
     [Header("Debug")]
@@ -74,9 +85,46 @@ public class SquashStretch : MonoBehaviour
     float lastHeight;
     float springValue;      // signed: positive stretches vertically, negative squashes
     float springVelocity;
+    float holdTarget;       // sustained target set by SetHold
+    float activeDamping;    // may be overridden per impulse, restored once settled
 
     /// <summary>Signed deformation. Negative means squashed.</summary>
     public float CurrentAmount => springValue;
+
+    /// <summary>
+    /// Sets a sustained target the spring eases toward. Use for held poses - crouching
+    /// into a jump, for instance. Negative squashes, positive stretches.
+    /// </summary>
+    public void SetHold(float amount)
+    {
+        holdTarget = Mathf.Clamp(amount, -maxStretch, maxStretch);
+    }
+
+    /// <summary>
+    /// Kicks the spring's velocity, for instantaneous events. The overshoot and settle then
+    /// fall out of the spring rather than needing to be animated.
+    ///
+    /// wobbleDuration, if positive, sets how long the wobble should last: the spring's
+    /// envelope decays as exp(-damping * t / 2), so reaching about 5% takes roughly
+    /// 6 / damping seconds. Bigger impacts can therefore ring for longer as well as harder.
+    /// </summary>
+    public void AddImpulse(float velocityChange, float wobbleDuration = 0f)
+    {
+        springVelocity += velocityChange;
+
+        activeDamping = wobbleDuration > 0.01f
+            ? Mathf.Max(6f / wobbleDuration, 0.5f)
+            : damping;
+    }
+
+    /// <summary>Drops everything back to rest immediately.</summary>
+    public void ResetSpring()
+    {
+        springValue = 0f;
+        springVelocity = 0f;
+        holdTarget = 0f;
+        activeDamping = damping;
+    }
 
     void Start()
     {
@@ -108,6 +156,7 @@ public class SquashStretch : MonoBehaviour
         }
 
         lastHeight = motionSource.position.y;
+        activeDamping = damping;
     }
 
     void LateUpdate()
@@ -119,19 +168,28 @@ public class SquashStretch : MonoBehaviour
         float verticalSpeed = (height - lastHeight) / dt;
         lastHeight = height;
 
-        // SPEED, not signed velocity: rising and falling should both stretch. The squash
-        // comes from the spring overshooting when the motion stops, not from the sign.
-        float target = 0f;
-        if (Mathf.Abs(verticalSpeed) > speedDeadzone)
-            target = Mathf.Clamp(Mathf.Abs(verticalSpeed) * velocityToStretch, 0f, maxStretch);
+        float target = holdTarget;
 
-        // Under-damped spring. The overshoot past zero on landing is what turns a sudden
-        // stop into a squash and an elastic settle, for free.
-        float accel = (target - springValue) * stiffness - springVelocity * damping;
+        if (autoFromMotion)
+        {
+            // SPEED, not signed velocity: rising and falling should both stretch. The squash
+            // comes from the spring overshooting when the motion stops, not from the sign.
+            if (Mathf.Abs(verticalSpeed) > speedDeadzone)
+                target += Mathf.Clamp(Mathf.Abs(verticalSpeed) * velocityToStretch, 0f, maxStretch);
+        }
+
+        // Under-damped spring. The overshoot past the target is what turns a sudden stop
+        // into a squash and an elastic settle, for free.
+        float accel = (target - springValue) * stiffness - springVelocity * activeDamping;
         springVelocity += accel * dt;
         springValue += springVelocity * dt;
 
         springValue = Mathf.Clamp(springValue, -maxStretch, maxStretch);
+
+        // Once it has rung out, go back to the default damping so the next impulse starts
+        // from a known state rather than inheriting the last one's timing.
+        if (Mathf.Abs(springValue - target) < 0.001f && Mathf.Abs(springVelocity) < 0.01f)
+            activeDamping = damping;
 
         Push();
     }
@@ -144,12 +202,27 @@ public class SquashStretch : MonoBehaviour
         Vector3 axisOS = rendererTransform.InverseTransformDirection(Vector3.up);
 
         // The pivot is authored relative to THIS transform, so it has to make the same trip.
-        Vector3 pivotWS = transform.TransformPoint(pivotLocal);
-        Vector3 pivotOS = rendererTransform.InverseTransformPoint(pivotWS);
+        Vector3 pivotOS = rendererTransform.InverseTransformPoint(PivotWorld());
 
         material.SetVector(AxisID, axisOS);
         material.SetFloat(AmountID, springValue);
         material.SetVector(PivotID, pivotOS);
+    }
+
+    /// <summary>
+    /// Where the scaling happens around, in world space.
+    ///
+    /// The bottom of the collider rather than its centre: squashing around the centre sinks
+    /// the character into the floor by half the squash, while squashing around the contact
+    /// point keeps it planted and spreads it outward instead.
+    /// </summary>
+    Vector3 PivotWorld()
+    {
+        if (pivotCollider == null) return transform.TransformPoint(pivotLocal);
+
+        // Bounds are a world-space AABB, which is exact for a sphere.
+        Bounds b = pivotCollider.bounds;
+        return new Vector3(b.center.x, b.min.y, b.center.z);
     }
 
     void OnDisable()
@@ -158,15 +231,14 @@ public class SquashStretch : MonoBehaviour
         if (material != null && material.HasProperty(AmountID))
             material.SetFloat(AmountID, 0f);
 
-        springValue = 0f;
-        springVelocity = 0f;
+        ResetSpring();
     }
 
     void OnDrawGizmosSelected()
     {
         if (!drawGizmos) return;
 
-        Vector3 pivotWS = transform.TransformPoint(pivotLocal);
+        Vector3 pivotWS = PivotWorld();
 
         Gizmos.color = new Color(1f, 0.4f, 0.8f, 0.9f);
         Gizmos.DrawWireSphere(pivotWS, 0.05f);

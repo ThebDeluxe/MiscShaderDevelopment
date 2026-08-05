@@ -45,6 +45,18 @@ public class ThirdPersonCamera : MonoBehaviour
     [SerializeField] private LayerMask obstructionMask = ~0;
     [SerializeField] private float cameraRadius = 0.25f;
 
+    [Tooltip("Never come closer to the target than this, however blocked the view is. " +
+             "Stops the camera diving into the character or through the floor.")]
+    [SerializeField] private float minDistance = 1.2f;
+
+    [Tooltip("Extra gap kept between the camera and whatever it hit, so the near clip plane " +
+             "does not slice into the surface.")]
+    [SerializeField] private float collisionPadding = 0.2f;
+
+    [Tooltip("Seconds to ease back out once the view clears. Pulling IN is always instant, " +
+             "since a slow pull-in would let the camera sit inside geometry.")]
+    [SerializeField] private float returnSmoothing = 0.25f;
+
     [Header("Cursor")]
     [SerializeField] private bool lockCursor = true;
 
@@ -54,6 +66,8 @@ public class ThirdPersonCamera : MonoBehaviour
     private float pitch;
     private Vector3 smoothedPivot;
     private Vector3 followVelocity;
+    private float currentDistance;
+    private float distanceVelocity;
 
     /// <summary>Camera forward flattened onto the ground plane. Use this to steer movement.</summary>
     public Vector3 PlanarForward
@@ -78,6 +92,7 @@ public class ThirdPersonCamera : MonoBehaviour
     {
         yaw = startYaw;
         pitch = startPitch;
+        currentDistance = distance;
 
         lookAction = new InputAction("Look", InputActionType.Value, expectedControlType: "Vector2");
         lookAction.AddBinding("<Mouse>/delta");
@@ -126,12 +141,20 @@ public class ThirdPersonCamera : MonoBehaviour
             : pivot;
 
         Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
-        Vector3 wanted = smoothedPivot - rotation * Vector3.forward * distance;
+        Vector3 direction = rotation * Vector3.back;   // from pivot toward the camera
 
-        if (avoidGeometry)
-            wanted = PullInIfBlocked(smoothedPivot, wanted);
+        float targetDistance = avoidGeometry
+            ? DistanceToObstruction(smoothedPivot, direction)
+            : distance;
 
-        transform.SetPositionAndRotation(wanted, rotation);
+        // Pull in instantly, ease back out. A smoothed pull-in would leave the camera
+        // inside geometry for several frames, which is exactly when the near clip plane
+        // starts slicing through triangles.
+        currentDistance = targetDistance < currentDistance
+            ? targetDistance
+            : Mathf.SmoothDamp(currentDistance, targetDistance, ref distanceVelocity, returnSmoothing);
+
+        transform.SetPositionAndRotation(smoothedPivot + direction * currentDistance, rotation);
     }
 
     private void ReadLook()
@@ -150,24 +173,30 @@ public class ThirdPersonCamera : MonoBehaviour
         pitch = Mathf.Clamp(pitch, minPitch, maxPitch);
     }
 
-    private Vector3 PullInIfBlocked(Vector3 pivot, Vector3 wanted)
+    /// <summary>
+    /// How far the camera can sit from the pivot before something gets in the way.
+    ///
+    /// A SphereCast that starts already overlapping a collider reports a hit at distance
+    /// zero with a zero normal. Taken at face value that slams the camera onto the pivot,
+    /// and the next frame - no longer overlapping - it snaps back out. That flip-flop is
+    /// the jitter you get when the camera grazes the ground, so a zero-distance hit is
+    /// treated as "fully blocked" rather than "zero distance away".
+    /// </summary>
+    private float DistanceToObstruction(Vector3 pivot, Vector3 direction)
     {
-        Vector3 direction = wanted - pivot;
-        float length = direction.magnitude;
-        if (length < 1e-4f) return wanted;
+        if (!Physics.SphereCast(pivot, cameraRadius, direction, out RaycastHit hit, distance,
+                                obstructionMask, QueryTriggerInteraction.Ignore))
+            return distance;
 
-        direction /= length;
+        if (hit.distance <= 1e-4f) return minDistance;
 
-        if (Physics.SphereCast(pivot, cameraRadius, direction, out RaycastHit hit, length,
-                               obstructionMask, QueryTriggerInteraction.Ignore))
-            return pivot + direction * hit.distance;
-
-        return wanted;
+        return Mathf.Clamp(hit.distance - collisionPadding, minDistance, distance);
     }
 
     private void OnValidate()
     {
         distance = Mathf.Max(0.1f, distance);
+        minDistance = Mathf.Clamp(minDistance, 0.05f, distance);
         maxPitch = Mathf.Max(minPitch + 1f, maxPitch);
     }
 }

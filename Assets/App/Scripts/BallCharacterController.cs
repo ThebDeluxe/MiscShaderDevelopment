@@ -82,6 +82,28 @@ public class BallCharacterController : MonoBehaviour
     [Tooltip("Extra distance below the ball used when testing for ground.")]
     [SerializeField] private float groundCheckPadding = 0.1f;
 
+    [Header("Squash & Stretch")]
+    [Tooltip("Deformation driven by this controller. Leave empty to search children.")]
+    [SerializeField] private SquashStretch squash;
+
+    [Tooltip("How flat the character gets at full jump charge, as anticipation.")]
+    [SerializeField] private float chargeSquash = 0.3f;
+
+    [Tooltip("Stretch impulse on launch, scaled by how charged the jump was.")]
+    [SerializeField] private float launchImpulse = 6f;
+
+    [Tooltip("Squash impulse on landing, per metre per second of impact speed.")]
+    [SerializeField] private float impactImpulse = 0.5f;
+
+    [Tooltip("Impact speed treated as the hardest possible landing, for scaling wobble.")]
+    [SerializeField] private float referenceImpactSpeed = 12f;
+
+    [Tooltip("Wobble length for the gentlest impact or weakest jump, in seconds.")]
+    [SerializeField] private float minWobbleDuration = 0.25f;
+
+    [Tooltip("Wobble length for the hardest impact or strongest jump, in seconds.")]
+    [SerializeField] private float maxWobbleDuration = 1.1f;
+
     // Input System actions (created in code so no .inputactions asset is required).
     private InputAction moveAction;
     private InputAction jumpAction;
@@ -105,6 +127,11 @@ public class BallCharacterController : MonoBehaviour
     private float lastGroundedY;
     private float[] followerYOffsets;
 
+    // Landing detection. The velocity is sampled at the END of each physics step, because
+    // by the time the solver reports us grounded it has already cancelled the fall.
+    private bool wasGrounded;
+    private float previousVerticalSpeed;
+
     private void Awake()
     {
         if (positionBody == null)
@@ -127,6 +154,13 @@ public class BallCharacterController : MonoBehaviour
         if (manageColliders) SetUpColliders();
 
         if (steeringCamera == null) steeringCamera = FindFirstObjectByType<ThirdPersonCamera>();
+        if (squash == null) squash = GetComponentInChildren<SquashStretch>();
+
+        // The inner collider is created at runtime, so it cannot be assigned in the
+        // inspector. Its bottom is the ground contact, which is where the squash should
+        // pivot - otherwise flattening sinks the character halfway through the floor.
+        if (squash != null && innerCollider != null && squash.pivotCollider == null)
+            squash.pivotCollider = innerCollider;
 
         // WASD + arrow keys + left stick -> a 2D vector.
         moveAction = new InputAction("Move", InputActionType.Value, expectedControlType: "Vector2");
@@ -261,7 +295,15 @@ public class BallCharacterController : MonoBehaviour
 
         // Build up the jump charge while Space is held (capped at maxChargeTime).
         if (isCharging)
+        {
             chargeTime = Mathf.Min(chargeTime + Time.deltaTime, maxChargeTime);
+
+            // Anticipation: sink toward flat as the charge builds. Volume preservation in
+            // the shader spreads the character outward as it flattens, so this reads as a
+            // crouch rather than a shrink.
+            if (squash != null)
+                squash.SetHold(-chargeSquash * Mathf.Clamp01(chargeTime / maxChargeTime));
+        }
     }
 
     private void FixedUpdate()
@@ -269,6 +311,7 @@ public class BallCharacterController : MonoBehaviour
         if (positionBody == null) return;
 
         CheckGrounded();
+        DetectLanding();
 
         // Remember the body's height whenever it's on the ground, so followers can
         // track terrain height without being carried upward by a jump.
@@ -278,6 +321,35 @@ public class BallCharacterController : MonoBehaviour
         Move();
         UpdateJumpArc();
         Roll();
+
+        // Sampled last so it holds the speed we were travelling at during this step, before
+        // a collision next step wipes it.
+        previousVerticalSpeed = positionBody.linearVelocity.y;
+        wasGrounded = isGrounded;
+    }
+
+    /// <summary>
+    /// Fires a squash impulse scaled by how hard the character hit.
+    ///
+    /// The impact speed comes from the PREVIOUS step: once the solver has resolved the
+    /// contact, vertical velocity is already back to roughly zero, so reading it after the
+    /// fact reports every landing as gentle.
+    /// </summary>
+    private void DetectLanding()
+    {
+        if (squash == null) return;
+        if (isGrounded == wasGrounded) return;
+        if (!isGrounded) return;
+
+        float impactSpeed = -previousVerticalSpeed;
+        if (impactSpeed <= 0.1f) return;
+
+        float severity = Mathf.Clamp01(impactSpeed / Mathf.Max(referenceImpactSpeed, 0.01f));
+
+        // Harder impacts hit deeper AND ring for longer, rather than only being bigger.
+        squash.SetHold(0f);
+        squash.AddImpulse(-impactImpulse * impactSpeed,
+                          Mathf.Lerp(minWobbleDuration, maxWobbleDuration, severity));
     }
 
     private void LateUpdate()
@@ -422,6 +494,15 @@ public class BallCharacterController : MonoBehaviour
 
         jumpTimer = 0f;
         isJumping = true;
+
+        // Release the anticipation crouch and fire a stretch scaled by jump power, so a
+        // charged launch stretches harder and wobbles for longer than a tap.
+        if (squash != null)
+        {
+            squash.SetHold(0f);
+            squash.AddImpulse(launchImpulse * t,
+                              Mathf.Lerp(minWobbleDuration, maxWobbleDuration, t));
+        }
 
         // The arc is authored, so gravity must not also act on the body while it runs.
         positionBody.useGravity = false;

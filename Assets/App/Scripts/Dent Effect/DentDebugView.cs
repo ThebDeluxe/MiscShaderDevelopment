@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Text;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -34,6 +36,27 @@ public class DentDebugView : MonoBehaviour
     [Tooltip("Show magnitude rather than raw value. The map stores a signed displacement " +
              "vector, so without this half the data sits below zero and clips to black.")]
     public bool showAbsolute = true;
+
+    [Tooltip("Show per-phase timings read from the profiler markers, in the build itself.\n\n" +
+             "Needs a Development Build - markers compile out of release builds. Useful " +
+             "where attaching the profiler is awkward, WebGL especially.")]
+    public bool showTimings = true;
+
+    static readonly string[] TimedMarkers =
+    {
+        "Dent.CollectSources",
+        "Dent.CacheSamples",
+        "Dent.PressDepths",
+        "Dent.BuildDentArrays",
+        "Dent.BuildIslands",
+        "Dent.UploadAndDraw",
+        "DentContact.Probe",
+        "DentContact.Track",
+        "DentContact.Apply"
+    };
+
+    ProfilerRecorder[] recorders;
+    readonly StringBuilder timingText = new StringBuilder(256);
 
     static readonly int MainTexID = Shader.PropertyToID("_MainTex");
     static readonly int ChannelID = Shader.PropertyToID("_Channel");
@@ -143,9 +166,10 @@ public class DentDebugView : MonoBehaviour
             $"Active sources: {dentManager.ActiveDentCount}\n" +
             $"Flip Y: {(dentManager.overrideFlipY ? dentManager.flipYValue : SystemInfo.graphicsUVStartsAtTop)}" +
             $"{(dentManager.overrideFlipY ? " (override)" : " (auto)")}\n" +
-            $"Debug Stamp All: {dentManager.debugStampAll}";
+            $"Debug Stamp All: {dentManager.debugStampAll}" +
+            (showTimings ? TimingText() : string.Empty);
 
-        GUI.Label(new Rect(10, 20 + drawHeight, 380, 160), info);
+        GUI.Label(new Rect(10, 20 + drawHeight, 380, 340), info);
     }
 
     /// <summary>
@@ -297,11 +321,59 @@ public class DentDebugView : MonoBehaviour
         return true;
     }
 
+    void OnEnable()
+    {
+        if (!showTimings) return;
+
+        recorders = new ProfilerRecorder[TimedMarkers.Length];
+        for (int i = 0; i < TimedMarkers.Length; i++)
+            recorders[i] = ProfilerRecorder.StartNew(ProfilerCategory.Scripts, TimedMarkers[i]);
+    }
+
     void OnDisable()
     {
+        if (recorders != null)
+        {
+            for (int i = 0; i < recorders.Length; i++)
+                if (recorders[i].Valid) recorders[i].Dispose();
+
+            recorders = null;
+        }
+
         if (material == null) return;
 
         if (Application.isPlaying) Destroy(material); else DestroyImmediate(material);
         material = null;
+    }
+
+    /// <summary>
+    /// Per-phase timings, read in the player rather than over a profiler connection.
+    ///
+    /// Marker values are nanoseconds. Only meaningful in a Development Build, since
+    /// ProfilerMarker compiles out of release builds and the recorders go invalid.
+    /// </summary>
+    string TimingText()
+    {
+        if (recorders == null) return string.Empty;
+
+        timingText.Clear();
+        timingText.Append('\n');
+
+        double total = 0;
+
+        for (int i = 0; i < recorders.Length; i++)
+        {
+            if (!recorders[i].Valid) continue;
+
+            double ms = recorders[i].LastValue * 1e-6;
+            total += ms;
+
+            timingText.Append(TimedMarkers[i]).Append(": ").Append(ms.ToString("0.000")).Append(" ms\n");
+        }
+
+        if (timingText.Length <= 1) return "\n(no marker data - needs a Development Build)\n";
+
+        timingText.Append("TOTAL: ").Append(total.ToString("0.000")).Append(" ms\n");
+        return timingText.ToString();
     }
 }

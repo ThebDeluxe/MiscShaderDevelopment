@@ -1,0 +1,390 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &2782824578610637868
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 4192387480525380367}
+  - component: {fileID: 6588635645056384827}
+  - component: {fileID: 4807807607735546416}
+  - component: {fileID: 8682507769724385475}
+  - component: {fileID: 710889707551558549}
+  m_Layer: 0
+  m_Name: Position Body
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &4192387480525380367
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2782824578610637868}
+  serializedVersion: 2
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
+  m_LocalPosition: {x: 0, y: 0.3, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 6625386134798469017}
+  m_Father: {fileID: 5379039925519020834}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &6588635645056384827
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2782824578610637868}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c33a43be35c2e5b4d978c684f435d574, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BlobMerger
+  body: {fileID: 0}
+  rollingObject: {fileID: 6625386134798469017}
+  ownContactSource: {fileID: 8682507769724385475}
+  controller: {fileID: 2975038467675803792}
+  blobMask:
+    serializedVersion: 2
+    m_Bits: 128
+  pickupPadding: 0.05
+  drawGizmos: 1
+--- !u!114 &4807807607735546416
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2782824578610637868}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9038d24a1c35873418630f71753a5d3c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SquashStretch
+  targetRenderer: {fileID: 5456451017969892598}
+  motionSource: {fileID: 4192387480525380367}
+  autoFromMotion: 0
+  velocityToStretch: 0.15
+  maxStretch: 0.5
+  speedDeadzone: 0.05
+  stiffness: 400
+  damping: 6
+  pivotCollider: {fileID: 0}
+  pivotLocal: {x: 0, y: 0, z: 0}
+  drawGizmos: 1
+--- !u!114 &8682507769724385475
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2782824578610637868}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 36ca9672d195be14689310e17d15b356, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DentContactSource
+  visualRadius: 0.7
+  centreOffset: {x: 0, y: 0, z: 0}
+  surfaceMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  sampleDirections: 14
+  curvatureSampleSpread: 0.3
+  maxSurfaceRadius: 50
+  mergeAngle: 25
+  maxSources: 3
+  minSink: 0.005
+  clampToEdges: 1
+  edgeProbeSteps: 4
+  edgeProbeTolerance: 0.06
+  surfaceSmoothing: 0.06
+  fadeInTime: 0.08
+  fadeOutTime: 0.25
+  planeSizeScale: 3
+  planeEdgeSoftness: 0.25
+  flattenScale: 0.15
+  strength: 1
+  rimBulge: 0.75
+  bulgeReach: 2
+  bulgeClamp: 0.3
+  decayMultiplier: 3.75
+  drawGizmos: 1
+  drawEdgeProbes: 0
+  logExtents: 0
+--- !u!54 &710889707551558549
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2782824578610637868}
+  serializedVersion: 5
+  m_Mass: 5
+  m_LinearDamping: 0
+  m_AngularDamping: 0.05
+  m_CenterOfMass: {x: 0, y: 0, z: 0}
+  m_InertiaTensor: {x: 1, y: 1, z: 1}
+  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ImplicitCom: 1
+  m_ImplicitTensor: 1
+  m_UseGravity: 1
+  m_IsKinematic: 0
+  m_Interpolate: 0
+  m_Constraints: 0
+  m_CollisionDetection: 0
+--- !u!1 &7443008680617177826
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 5379039925519020834}
+  - component: {fileID: 2975038467675803792}
+  - component: {fileID: 3003846175921538394}
+  - component: {fileID: 8160045513406346318}
+  - component: {fileID: 8508303469249223072}
+  m_Layer: 0
+  m_Name: Lil Dude Character
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &5379039925519020834
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7443008680617177826}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: -5.258, y: 0.752, z: 0.068}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 4192387480525380367}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2975038467675803792
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7443008680617177826}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4e8963c0410fe534bae275357b259d6b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::BallCharacterController
+  positionBody: {fileID: 710889707551558549}
+  rollingObject: {fileID: 6625386134798469017}
+  horizontalFollowers: []
+  ballRadius: 0.7
+  innerRadius: 0.4
+  outerRadius: 0.7
+  manageColliders: 1
+  steeringCamera: {fileID: 0}
+  moveSpeed: 6
+  acceleration: 40
+  minJumpHeight: 1
+  maxJumpHeight: 3.5
+  minJumpDuration: 0.45
+  maxJumpDuration: 0.85
+  maxChargeTime: 0.5
+  groundMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  groundCheckPadding: 0.1
+  squash: {fileID: 4807807607735546416}
+  chargeSquash: 0.3
+  launchImpulse: 80
+  impactImpulse: 0.5
+  referenceImpactSpeed: 12
+  minWobbleDuration: 0.1
+  maxWobbleDuration: 0.5
+--- !u!114 &3003846175921538394
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7443008680617177826}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 401a2f814bd578845855855756f44144, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DentManager
+  targetRenderer: {fileID: 5456451017969892598}
+  stampMaterial: {fileID: 2100000, guid: 6593a7ea94a518844b433590a9867d20, type: 2}
+  format: 2
+  decayPerSecond: 0.9
+  decayDepthBias: 2
+  filterSourcesByBounds: 1
+  boundsPadding: 0.05
+  islandRigidity: 0
+  rigidBelowRadius: 0.1
+  flexibleAboveRadius: 0.35
+  debugStampAll: 0
+  overrideFlipY: 0
+  flipYValue: 1
+--- !u!114 &8160045513406346318
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7443008680617177826}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6d7ddef77dda67a44bb52ec08bfb7d1a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DentLOD
+  dentManager: {fileID: 3003846175921538394}
+  contactSource: {fileID: 8682507769724385475}
+  targetRenderer: {fileID: 5456451017969892598}
+  referenceCamera: {fileID: 0}
+  fullQualityCoverage: 0.25
+  cutoffCoverage: 0.04
+  hysteresis: 0.25
+  maxUpdateInterval: 4
+  fadeDepth: 1
+  depthProperty: _Max_Dent_Depth
+  fullDepth: 1
+  fadeSmoothing: 0.2
+--- !u!114 &8508303469249223072
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 7443008680617177826}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a6239da4d56a7f74e80c3527aa27800f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DentDebugView
+  dentManager: {fileID: 3003846175921538394}
+  dentLOD: {fileID: 8160045513406346318}
+  displaySize: 256
+  showInfo: 1
+  channel: 0
+  keyboardShortcuts: 1
+  showAbsolute: 1
+  showTimings: 1
+--- !u!1001 &6663252581060141170
+PrefabInstance:
+  m_ObjectHideFlags: 0
+  serializedVersion: 2
+  m_Modification:
+    serializedVersion: 3
+    m_TransformParent: {fileID: 4192387480525380367}
+    m_Modifications:
+    - target: {fileID: -8679921383154817045, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+      propertyPath: m_LocalPosition.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+      propertyPath: m_LocalPosition.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+      propertyPath: m_LocalPosition.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+      propertyPath: m_LocalRotation.w
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+      propertyPath: m_LocalRotation.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+      propertyPath: m_LocalRotation.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+      propertyPath: m_LocalRotation.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.x
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.y
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -8679921383154817045, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+      propertyPath: m_LocalEulerAnglesHint.z
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -7511558181221131132, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+      propertyPath: m_ForceMeshLod
+      value: -1
+      objectReference: {fileID: 0}
+    - target: {fileID: -7511558181221131132, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+      propertyPath: 'm_Materials.Array.data[0]'
+      value: 
+      objectReference: {fileID: 2100000, guid: 89ce58eeecd973f40bdcd0390ce1bd32, type: 2}
+    - target: {fileID: 919132149155446097, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+      propertyPath: m_Name
+      value: Lil_Dude
+      objectReference: {fileID: 0}
+    m_RemovedComponents: []
+    m_RemovedGameObjects: []
+    m_AddedGameObjects: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+      insertIndex: 1
+      addedObject: {fileID: 3533541507451855521}
+  m_SourcePrefab: {fileID: 100100000, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+--- !u!23 &5456451017969892598 stripped
+MeshRenderer:
+  m_CorrespondingSourceObject: {fileID: -7511558181221131132, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+  m_PrefabInstance: {fileID: 6663252581060141170}
+  m_PrefabAsset: {fileID: 0}
+--- !u!1 &5816901647401901347 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+  m_PrefabInstance: {fileID: 6663252581060141170}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &3533541507451855521
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5816901647401901347}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: c8dbd45cc488b014b905fa8eb1277a27, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DentVertexUVGenerator
+  targetUVChannel: 2
+  weldEpsilon: 0.0001
+  samplesPerIsland: 32
+--- !u!4 &6625386134798469017 stripped
+Transform:
+  m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+  m_PrefabInstance: {fileID: 6663252581060141170}
+  m_PrefabAsset: {fileID: 0}

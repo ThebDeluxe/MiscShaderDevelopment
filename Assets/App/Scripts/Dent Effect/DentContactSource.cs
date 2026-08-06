@@ -144,6 +144,35 @@ public class DentContactSource : MonoBehaviour
     readonly List<Tracked> tracked = new List<Tracked>(8);
     readonly List<DentSource> pool = new List<DentSource>();
 
+    // Blobs merged into the same assembly. Two clay balls pressed together share a FLAT
+    // disc, not a spherical dent, so these are handled explicitly rather than being picked
+    // up as curved surfaces by the overlap pass.
+    readonly List<DentContactSource> siblings = new List<DentContactSource>();
+    readonly HashSet<Collider> siblingColliders = new HashSet<Collider>();
+
+    /// <summary>
+    /// Tells this source which other blobs share its assembly. Their colliders are then
+    /// skipped by the ordinary probe and given flat interfaces instead.
+    /// </summary>
+    public void SetSiblings(List<DentContactSource> all, DentContactSource self)
+    {
+        siblings.Clear();
+        siblingColliders.Clear();
+
+        for (int i = 0; i < all.Count; i++)
+        {
+            if (all[i] == null || all[i] == self) continue;
+
+            siblings.Add(all[i]);
+            all[i].GetComponentsInChildren(true, colliderBuffer);
+
+            for (int c = 0; c < colliderBuffer.Count; c++)
+                siblingColliders.Add(colliderBuffer[c]);
+        }
+    }
+
+    static readonly List<Collider> colliderBuffer = new List<Collider>(8);
+
     Vector3[] directions;
     int builtDirectionCount;
 
@@ -267,6 +296,9 @@ public class DentContactSource : MonoBehaviour
             if (col == null) continue;
             if (col.transform.IsChildOf(transform)) continue;
 
+            // Merged siblings get a flat interface instead of a curved one.
+            if (siblingColliders.Contains(col)) continue;
+
             if (col is BoxCollider box) ProbeBox(box, centre, mergeDot);
             else if (col is SphereCollider sphere) ProbeSphere(sphere, centre, mergeDot);
             else if (col is CapsuleCollider capsule) ProbeCapsule(capsule, centre, mergeDot);
@@ -276,6 +308,8 @@ public class DentContactSource : MonoBehaviour
 
         // Rays are only needed for geometry that cannot be solved directly.
         if (needsRaycastPass) ProbeByRays(centre, mergeDot);
+
+        for (int i = 0; i < siblings.Count; i++) ProbeSibling(siblings[i], centre, mergeDot);
 
         FinaliseSampledCurvature();
 
@@ -616,6 +650,59 @@ public class DentContactSource : MonoBehaviour
                 hasExtents = false
             }, mergeDot);
         }
+    }
+
+    /// <summary>
+    /// Interface with a blob merged into the same assembly.
+    ///
+    /// Two overlapping spheres meet at their RADICAL PLANE - flat, perpendicular to the
+    /// line joining their centres, positioned where the two surfaces would intersect. That
+    /// is what clay balls pressed together actually share, whereas treating a sibling as
+    /// an ordinary curved surface would push a spherical dent into it instead.
+    ///
+    ///     x = (d^2 + ra^2 - rb^2) / 2d      distance from our centre to the plane
+    ///     r = sqrt(ra^2 - x^2)              radius of the contact disc
+    /// </summary>
+    void ProbeSibling(DentContactSource other, Vector3 centre, float mergeDot)
+    {
+        Vector3 otherCentre = other.transform.TransformPoint(other.centreOffset);
+
+        Vector3 delta = centre - otherCentre;
+        float d = delta.magnitude;
+        if (d < 1e-4f) return;
+
+        float ra = visualRadius;
+        float rb = other.visualRadius;
+        if (d >= ra + rb) return;   // not touching yet
+
+        Vector3 axis = delta / d;   // from the sibling's surface into us
+
+        float x = (d * d + ra * ra - rb * rb) / (2f * d);
+
+        // A much larger sibling can put the plane behind our centre; the press is still
+        // valid, it just swallows more of us.
+        float sink = Mathf.Min(ra - x, ra);
+        if (sink < minSink) return;
+
+        float discSq = ra * ra - x * x;
+        if (discSq <= 0f) return;
+
+        float disc = Mathf.Sqrt(discSq);
+
+        Quaternion basis = LookAlong(axis);
+
+        MergeOrAdd(new Contact
+        {
+            shape = DentShape.Plane,
+            point = centre - axis * x,
+            pressAxis = axis,
+            right = basis * Vector3.right,
+            sink = sink,
+            curvature = 0f,          // flat: the interface is a plane, not a curve
+            hasExtents = true,
+            minX = -disc, maxX = disc,
+            minY = -disc, maxY = disc
+        }, mergeDot);
     }
 
     void MergeOrAdd(Contact c, float mergeDot)

@@ -50,6 +50,18 @@ public class BallCharacterController : MonoBehaviour
     private SphereCollider innerCollider;
     private SphereCollider outerCollider;
 
+    // Radius used to convert movement into rolling. Starts at the ball's own radius and is
+    // replaced by BlobMerger once the assembly grows, since a two-blob lump has no single
+    // radius of its own.
+    private float rollingRadius;
+
+    /// <summary>Effective radius the assembly rolls at. Set by BlobMerger when blobs merge.</summary>
+    public float RollingRadius
+    {
+        get => rollingRadius;
+        set => rollingRadius = Mathf.Max(0.01f, value);
+    }
+
     [Header("Movement")]
     [Tooltip("Camera that movement is relative to. W goes away from it. Leave empty to " +
              "find one automatically, or to fall back to world axes if there is none.")]
@@ -152,6 +164,8 @@ public class BallCharacterController : MonoBehaviour
             Debug.LogError("BallCharacterController: Rolling Object is not assigned.", this);
 
         if (manageColliders) SetUpColliders();
+
+        rollingRadius = ballRadius;
 
         if (steeringCamera == null) steeringCamera = FindFirstObjectByType<ThirdPersonCamera>();
         if (squash == null) squash = GetComponentInChildren<SquashStretch>();
@@ -443,17 +457,20 @@ public class BallCharacterController : MonoBehaviour
 
     private void Roll()
     {
-        if (rollingObject == null || ballRadius <= 0.0001f) return;
+        if (rollingObject == null || rollingRadius <= 0.0001f) return;
 
         // Roll the visual object to match the body's horizontal travel:
         //   angularSpeed (rad/s) = linearSpeed / radius
         //   rotation axis        = up x moveDirection
+        //
+        // The radius comes from the ASSEMBLY rather than the original ball, so absorbing
+        // blobs makes the whole lump roll more slowly as it grows.
         Vector3 horizontal = new Vector3(positionBody.linearVelocity.x, 0f, positionBody.linearVelocity.z);
         float speed = horizontal.magnitude;
         if (speed <= 0.001f) return;
 
         Vector3 axis = Vector3.Cross(Vector3.up, horizontal.normalized);
-        float degrees = (speed / ballRadius) * Mathf.Rad2Deg * Time.fixedDeltaTime;
+        float degrees = (speed / rollingRadius) * Mathf.Rad2Deg * Time.fixedDeltaTime;
         rollingObject.Rotate(axis * degrees, Space.World);
     }
 

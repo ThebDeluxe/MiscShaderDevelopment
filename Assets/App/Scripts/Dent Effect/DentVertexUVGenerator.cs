@@ -85,6 +85,19 @@ public class DentVertexUVGenerator : MonoBehaviour
             return;
         }
 
+        // In the editor Unity keeps a CPU copy of mesh data regardless of this flag, so a
+        // non-readable mesh only fails in a BUILD - where vertices comes back empty, the
+        // instanced mesh ends up with no geometry, and the character silently vanishes
+        // while physics carries on as normal.
+        if (!meshFilter.sharedMesh.isReadable)
+        {
+            Debug.LogError($"{name}: mesh '{meshFilter.sharedMesh.name}' is not readable. " +
+                           "Enable Read/Write in the model's import settings - this system " +
+                           "reads vertices and triangles at runtime. Without it the mesh will " +
+                           "render correctly in the editor and disappear in a build.", this);
+            return;
+        }
+
         // Work on an instance so the mesh asset on disk is never modified.
         instancedMesh = Instantiate(meshFilter.sharedMesh);
         instancedMesh.name = meshFilter.sharedMesh.name + " (Dent Instance)";

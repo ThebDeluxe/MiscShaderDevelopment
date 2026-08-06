@@ -118,6 +118,13 @@ public class DentColliderRig : MonoBehaviour
             return;
         }
 
+        if (!mesh.isReadable)
+        {
+            Debug.LogError($"{name}: mesh '{mesh.name}' is not readable. Enable Read/Write in " +
+                           "the model's import settings - baking reads vertices and triangles.", this);
+            return;
+        }
+
         Vector3[] verts = mesh.vertices;
         Vector3[] normals = mesh.normals;
         if (normals == null || normals.Length != verts.Length)
@@ -297,6 +304,15 @@ public class DentColliderRig : MonoBehaviour
         if (dentManager == null) dentManager = GetComponentInParent<DentManager>();
 
         var mesh = GetComponent<MeshFilter>().sharedMesh;
+        if (mesh == null || !mesh.isReadable)
+        {
+            Debug.LogError($"{name}: mesh is missing or not readable at runtime. Enable " +
+                           "Read/Write in the model's import settings - skinning the collider " +
+                           "spheres reads vertex positions every frame.", this);
+            enabled = false;
+            return;
+        }
+
         restPositions = mesh.vertices;
         restNormals = mesh.normals;
         if (restNormals == null || restNormals.Length != restPositions.Length)

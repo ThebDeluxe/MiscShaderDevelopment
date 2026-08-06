@@ -274,6 +274,10 @@ MonoBehaviour:
   distance: 6
   mouseSensitivity: 0.15
   gamepadSensitivity: 180
+  zoomSpeed: 0.5
+  minDistance: 1.2
+  maxDistance: 20
+  zoomSmoothing: 0.08
   minPitch: -20
   maxPitch: 70
   startYaw: 0
@@ -284,7 +288,7 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 4294967295
   cameraRadius: 0.25
-  minDistance: 1.2
+  minObstructionDistance: 1.2
   collisionPadding: 0.2
   returnSmoothing: 0.25
   lockCursor: 1
@@ -457,6 +461,10 @@ PrefabInstance:
     - target: {fileID: -8679921383154817045, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: -7511558181221131132, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+      propertyPath: m_ForceMeshLod
+      value: -1
       objectReference: {fileID: 0}
     - target: {fileID: -7511558181221131132, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
       propertyPath: 'm_Materials.Array.data[0]'
@@ -1818,6 +1826,10 @@ PrefabInstance:
       propertyPath: m_Name
       value: EGG BOY
       objectReference: {fileID: 0}
+    - target: {fileID: 919132149155446097, guid: 0e67731e978adb84e84ac6be435bf988, type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -2335,7 +2347,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &1310362873
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -2468,6 +2480,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DentDebugView
   dentManager: {fileID: 1310362873}
+  dentLOD: {fileID: 0}
   displaySize: 256
   showInfo: 1
   channel: 0
@@ -3026,6 +3039,7 @@ GameObject:
   - component: {fileID: 2116916762}
   - component: {fileID: 2116916761}
   - component: {fileID: 2116916760}
+  - component: {fileID: 2116916763}
   - component: {fileID: 2116916759}
   m_Layer: 0
   m_Name: Lil Dude Parent Controller
@@ -3047,6 +3061,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DentDebugView
   dentManager: {fileID: 2116916760}
+  dentLOD: {fileID: 2116916763}
   displaySize: 256
   showInfo: 1
   channel: 0
@@ -3131,6 +3146,30 @@ Transform:
   - {fileID: 258037873}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &2116916763
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2116916757}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6d7ddef77dda67a44bb52ec08bfb7d1a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DentLOD
+  dentManager: {fileID: 2116916760}
+  contactSource: {fileID: 258037876}
+  targetRenderer: {fileID: 1455394641}
+  referenceCamera: {fileID: 0}
+  fullQualityCoverage: 0.25
+  cutoffCoverage: 0.04
+  hysteresis: 0.25
+  maxUpdateInterval: 4
+  fadeDepth: 1
+  depthProperty: _Max_Dent_Depth
+  fullDepth: 1
+  fadeSmoothing: 0.2
 --- !u!1 &2123941572
 GameObject:
   m_ObjectHideFlags: 0

@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Unity.Profiling;
 using UnityEngine;
 
 /// <summary>
@@ -121,6 +122,9 @@ public class DentContactSource : MonoBehaviour
     [Header("Debug")]
     public bool drawGizmos = true;
 
+    /// <summary>Skips the frame's work. Set by DentLOD to throttle at distance.</summary>
+    [System.NonSerialized] public bool paused;
+
     [Tooltip("Draw every edge probe: green where the surface was found to continue, red " +
              "where it was not. If red dots never appear past a ledge, the probe is the " +
              "problem; if they do but the plane still presses out there, the problem is " +
@@ -142,6 +146,10 @@ public class DentContactSource : MonoBehaviour
 
     Vector3[] directions;
     int builtDirectionCount;
+
+    static readonly ProfilerMarker MarkerProbe = new ProfilerMarker("DentContact.Probe");
+    static readonly ProfilerMarker MarkerTrack = new ProfilerMarker("DentContact.Track");
+    static readonly ProfilerMarker MarkerApply = new ProfilerMarker("DentContact.Apply");
 
     struct Contact
     {
@@ -196,12 +204,13 @@ public class DentContactSource : MonoBehaviour
 
     void LateUpdate()
     {
-        probeLog.Clear();
+        if (paused) return;
 
         EnsureDirections();
-        Probe();
-        TrackSurfaces();
-        ApplyToSources();
+
+        using (MarkerProbe.Auto()) Probe();
+        using (MarkerTrack.Auto()) TrackSurfaces();
+        using (MarkerApply.Auto()) ApplyToSources();
 
         if (logExtents && Time.time >= nextLogTime)
         {
@@ -242,6 +251,7 @@ public class DentContactSource : MonoBehaviour
     void Probe()
     {
         contacts.Clear();
+        probeLog.Clear();
 
         Vector3 centre = transform.TransformPoint(centreOffset);
         float mergeDot = Mathf.Cos(mergeAngle * Mathf.Deg2Rad);

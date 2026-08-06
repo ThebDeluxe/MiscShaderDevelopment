@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -49,6 +50,16 @@ public class DentVertexUVGenerator : MonoBehaviour
 
     /// <summary>Number of connected components found.</summary>
     public int IslandCount { get; private set; }
+
+    /// <summary>
+    /// Mesh LOD levels on the source mesh. 1 when the mesh has none, or when the running
+    /// Unity version predates the feature.
+    /// </summary>
+    public int MeshLodCount { get; private set; } = 1;
+
+    /// <summary>Levels surviving on the instance this component actually renders.</summary>
+    public int InstanceMeshLodCount { get; private set; } = 1;
+
     /// <summary>Centroid of each island, in LOCAL space. Used only as a size reference.</summary>
     public Vector3[] IslandCentroids { get; private set; }
     /// <summary>Distance from each island's centroid to its furthest vertex, in LOCAL space.</summary>
@@ -77,6 +88,14 @@ public class DentVertexUVGenerator : MonoBehaviour
         // Work on an instance so the mesh asset on disk is never modified.
         instancedMesh = Instantiate(meshFilter.sharedMesh);
         instancedMesh.name = meshFilter.sharedMesh.name + " (Dent Instance)";
+
+        // Mesh LOD levels all share ONE vertex buffer - each level is just a range of the
+        // index buffer - so a per-vertex mapping is LOD invariant: vertex 500 is the same
+        // point at every level and reads the same texel. Nothing here needs to change for
+        // it. What is worth checking is that instantiating has not dropped the LOD ranges,
+        // which would silently cost the renderer its LODs.
+        MeshLodCount = ReadLodCount(meshFilter.sharedMesh);
+        InstanceMeshLodCount = ReadLodCount(instancedMesh);
 
         Vector3[] verts = instancedMesh.vertices;
         VertexCount = verts.Length;
@@ -112,7 +131,43 @@ public class DentVertexUVGenerator : MonoBehaviour
         int texels = TextureWidth * TextureHeight;
         Debug.Log($"{name}: dent data generated. {VertexCount} verts -> {TextureWidth}x{TextureHeight} " +
                   $"({texels} texels, {(VertexCount / (float)texels):P0} used), " +
-                  $"{IslandCount} island(s), on TEXCOORD{targetUVChannel}.", this);
+                  $"{IslandCount} island(s), on TEXCOORD{targetUVChannel}. " +
+                  $"Mesh LOD levels: {MeshLodCount}.", this);
+
+        if (InstanceMeshLodCount < MeshLodCount)
+        {
+            Debug.LogWarning($"{name}: the source mesh had {MeshLodCount} Mesh LOD levels but the " +
+                             $"instance kept {InstanceMeshLodCount} - the renderer has lost its " +
+                             "LODs. The dent mapping itself is unaffected, since all levels share " +
+                             "one vertex buffer, but the LOD saving is gone.", this);
+        }
+    }
+
+    // --------------------------------------------------------------------
+    // Mesh LOD
+    //
+    // Queried by reflection so this compiles on Unity versions predating the feature, and
+    // reports a single level when it is unavailable or unused.
+    // --------------------------------------------------------------------
+
+    static PropertyInfo lodCountProperty;
+    static bool lodCountResolved;
+
+    public static int ReadLodCount(Mesh mesh)
+    {
+        if (mesh == null) return 1;
+
+        if (!lodCountResolved)
+        {
+            lodCountResolved = true;
+            lodCountProperty = typeof(Mesh).GetProperty("lodCount",
+                                                        BindingFlags.Public | BindingFlags.Instance);
+        }
+
+        if (lodCountProperty == null) return 1;
+
+        try { return Mathf.Max(1, (int)lodCountProperty.GetValue(mesh)); }
+        catch { return 1; }
     }
 
     // --------------------------------------------------------------------

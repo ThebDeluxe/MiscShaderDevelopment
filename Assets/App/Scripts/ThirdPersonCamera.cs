@@ -27,6 +27,16 @@ public class ThirdPersonCamera : MonoBehaviour
     [SerializeField] private float mouseSensitivity = 0.15f;
     [SerializeField] private float gamepadSensitivity = 180f;
 
+    [Header("Zoom")]
+    [Tooltip("Metres of zoom per notch of scroll wheel.")]
+    [SerializeField] private float zoomSpeed = 0.5f;
+
+    [SerializeField] private float minDistance = 1.5f;
+    [SerializeField] private float maxDistance = 20f;
+
+    [Tooltip("Seconds for the zoom to settle. 0 snaps.")]
+    [SerializeField] private float zoomSmoothing = 0.08f;
+
     [Tooltip("How far the camera can look down and up, in degrees.")]
     [SerializeField] private float minPitch = -20f;
     [SerializeField] private float maxPitch = 70f;
@@ -47,7 +57,7 @@ public class ThirdPersonCamera : MonoBehaviour
 
     [Tooltip("Never come closer to the target than this, however blocked the view is. " +
              "Stops the camera diving into the character or through the floor.")]
-    [SerializeField] private float minDistance = 1.2f;
+    [SerializeField] private float minObstructionDistance = 1.2f;
 
     [Tooltip("Extra gap kept between the camera and whatever it hit, so the near clip plane " +
              "does not slice into the surface.")]
@@ -61,9 +71,12 @@ public class ThirdPersonCamera : MonoBehaviour
     [SerializeField] private bool lockCursor = true;
 
     private InputAction lookAction;
+    private InputAction zoomAction;
 
     private float yaw;
     private float pitch;
+    private float wantedDistance;
+    private float zoomVelocity;
     private Vector3 smoothedPivot;
     private Vector3 followVelocity;
     private float currentDistance;
@@ -85,18 +98,24 @@ public class ThirdPersonCamera : MonoBehaviour
         }
     }
 
-    /// <summary>Camera right flattened onto the ground plane.</summary>
+    /// <summary>
+    /// Camera right flattened onto the ground plane.
+    /// </summary>
     public Vector3 PlanarRight => Vector3.Cross(Vector3.up, PlanarForward);
 
     private void Awake()
     {
         yaw = startYaw;
         pitch = startPitch;
+        wantedDistance = distance;
         currentDistance = distance;
 
         lookAction = new InputAction("Look", InputActionType.Value, expectedControlType: "Vector2");
         lookAction.AddBinding("<Mouse>/delta");
         lookAction.AddBinding("<Gamepad>/rightStick");
+
+        zoomAction = new InputAction("Zoom", InputActionType.Value, expectedControlType: "Vector2");
+        zoomAction.AddBinding("<Mouse>/scroll");
 
         if (target != null)
             smoothedPivot = target.position + targetOffset;
@@ -105,17 +124,20 @@ public class ThirdPersonCamera : MonoBehaviour
     private void OnEnable()
     {
         lookAction?.Enable();
+        zoomAction?.Enable();
         ApplyCursorState();
     }
 
     private void OnDisable()
     {
         lookAction?.Disable();
+        zoomAction?.Disable();
     }
 
     private void OnDestroy()
     {
         lookAction?.Dispose();
+        zoomAction?.Dispose();
     }
 
     private void ApplyCursorState()
@@ -131,6 +153,7 @@ public class ThirdPersonCamera : MonoBehaviour
         if (target == null) return;
 
         ReadLook();
+        ReadZoom();
 
         Vector3 pivot = target.position + targetOffset;
 
@@ -182,21 +205,49 @@ public class ThirdPersonCamera : MonoBehaviour
     /// the jitter you get when the camera grazes the ground, so a zero-distance hit is
     /// treated as "fully blocked" rather than "zero distance away".
     /// </summary>
+    /// <summary>
+    /// Scroll wheel zoom. A wheel notch reports 120 rather than 1, so only the sign is
+    /// used - scaling by the raw value would fling the camera across the level per click.
+    /// </summary>
+    private void ReadZoom()
+    {
+        float scroll = zoomAction.ReadValue<Vector2>().y;
+
+        if (Mathf.Abs(scroll) > 0.01f)
+            wantedDistance = Mathf.Clamp(wantedDistance - Mathf.Sign(scroll) * zoomSpeed,
+                                         minDistance, maxDistance);
+
+        distance = zoomSmoothing > 0f
+            ? Mathf.SmoothDamp(distance, wantedDistance, ref zoomVelocity, zoomSmoothing)
+            : wantedDistance;
+    }
+
+    /// <summary>
+    /// How far the camera can sit from the pivot before something gets in the way.
+    ///
+    /// A SphereCast that starts already overlapping a collider reports a hit at distance
+    /// zero with a zero normal. Taken at face value that slams the camera onto the pivot,
+    /// and the next frame - no longer overlapping - it snaps back out. That flip-flop is
+    /// the jitter you get when the camera grazes the ground, so a zero-distance hit is
+    /// treated as "fully blocked" rather than "zero distance away".
+    /// </summary>
     private float DistanceToObstruction(Vector3 pivot, Vector3 direction)
     {
         if (!Physics.SphereCast(pivot, cameraRadius, direction, out RaycastHit hit, distance,
                                 obstructionMask, QueryTriggerInteraction.Ignore))
             return distance;
 
-        if (hit.distance <= 1e-4f) return minDistance;
+        if (hit.distance <= 1e-4f) return minObstructionDistance;
 
-        return Mathf.Clamp(hit.distance - collisionPadding, minDistance, distance);
+        return Mathf.Clamp(hit.distance - collisionPadding, minObstructionDistance, distance);
     }
 
     private void OnValidate()
     {
         distance = Mathf.Max(0.1f, distance);
-        minDistance = Mathf.Clamp(minDistance, 0.05f, distance);
+        minDistance = Mathf.Max(0.1f, minDistance);
+        maxDistance = Mathf.Max(minDistance + 0.1f, maxDistance);
+        minObstructionDistance = Mathf.Clamp(minObstructionDistance, 0.05f, maxDistance);
         maxPitch = Mathf.Max(minPitch + 1f, maxPitch);
     }
 }

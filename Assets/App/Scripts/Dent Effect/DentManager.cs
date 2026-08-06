@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -78,6 +79,13 @@ public class DentManager : MonoBehaviour
     public bool overrideFlipY = false;
     public bool flipYValue = true;
 
+    /// <summary>
+    /// Skips the frame's work while leaving everything allocated. DentLOD sets this to
+    /// throttle at distance - disabling the component instead would run OnDisable and
+    /// release the render textures, losing every accumulated dent.
+    /// </summary>
+    [System.NonSerialized] public bool paused;
+
     const int MAX_DENTS = 16;     // must match DENT_MAX in DentStamp.hlsl
     const int MAX_ISLANDS = 32;   // must match ISLAND_MAX in DentStamp.hlsl
 
@@ -104,11 +112,50 @@ public class DentManager : MonoBehaviour
     static readonly int IslandCountID   = Shader.PropertyToID("_IslandCount");
     static readonly int DentTextureID   = Shader.PropertyToID(DentTextureProperty);
 
+    // Per-phase markers. Deep profiling distorts call-heavy code badly, so these give a
+    // breakdown without it - turn deep profiling OFF and read these instead.
+    static readonly ProfilerMarker MarkerCollect = new ProfilerMarker("Dent.CollectSources");
+    static readonly ProfilerMarker MarkerCacheSamples = new ProfilerMarker("Dent.CacheSamples");
+    static readonly ProfilerMarker MarkerPressDepths = new ProfilerMarker("Dent.PressDepths");
+    static readonly ProfilerMarker MarkerDentArrays = new ProfilerMarker("Dent.BuildDentArrays");
+    static readonly ProfilerMarker MarkerIslands = new ProfilerMarker("Dent.BuildIslands");
+    static readonly ProfilerMarker MarkerUpload = new ProfilerMarker("Dent.UploadAndDraw");
+
     /// <summary>Every enabled source in the scene. Each manager filters this down itself.</summary>
     static readonly List<DentSource> allSources = new List<DentSource>();
 
     /// <summary>The subset actually reaching this renderer, rebuilt each frame.</summary>
     readonly List<DentSource> active = new List<DentSource>(MAX_DENTS);
+
+    /// <summary>
+    /// A source's state, copied out once per frame.
+    ///
+    /// The sampling loops run islands x samples x sources times - a few thousand
+    /// iterations - and every one of them used to read transform.position, .forward and
+    /// .right straight off the component. Transform property reads cross into native code
+    /// and are among the more expensive things to put in a hot loop, so reading them once
+    /// and working from plain memory is most of the cost of this system.
+    /// </summary>
+    struct SourceSnapshot
+    {
+        public Vector3 position, axis, right;
+        public DentShape shape;
+        public float depth, inner, outer, flatten, strength, spread;
+        public float rimBulge, bulgeReach, bulgeNormalBias, bulgeOutward, bulgeRadius, bulgeClamp;
+        public float decayMultiplier, planeCurvature, planeEdgeSoftness;
+        public Vector2 planeOffset;
+    }
+
+    readonly SourceSnapshot[] snapshots = new SourceSnapshot[MAX_DENTS];
+
+    /// <summary>Bulge driver per source, resolved once rather than per sample.</summary>
+    readonly float[] drivers = new float[MAX_DENTS];
+
+    // Island sample points in world space, flattened. Both sampling passes walk the same
+    // points, so transforming them once saves a full pass of matrix multiplies.
+    Vector3[] sampleWorld;
+    readonly int[] sampleStart = new int[MAX_ISLANDS + 1];
+    int sampleIslandCount;
 
     // xyz = world position of contact point, w = shape id (0 capsule, 1 cylinder, 2 square)
     readonly Vector4[] dentPos    = new Vector4[MAX_DENTS];
@@ -134,6 +181,7 @@ public class DentManager : MonoBehaviour
     bool aIsCurrent;
     CommandBuffer cmd;
     bool initialised;
+    float sinceLastStamp;
 
     public RenderTexture CurrentDentMap => aIsCurrent ? rtA : rtB;
     public int ActiveDentCount => active.Count;
@@ -255,14 +303,24 @@ public class DentManager : MonoBehaviour
     {
         if (!EnsureInitialised()) return;
 
-        CollectActiveSources();
-        ComputePressDepths();
+        // Elapsed rather than per-frame, so a throttled update decays by the right amount
+        // instead of the amount one frame would have.
+        sinceLastStamp += Time.deltaTime;
+
+        if (paused) return;
+
+        using (MarkerCollect.Auto()) CollectActiveSources();
+        using (MarkerCacheSamples.Auto()) CacheSampleWorldPositions();
+        using (MarkerPressDepths.Auto()) ComputePressDepths();
+        ResolveDrivers();
 
         RenderTexture src = aIsCurrent ? rtA : rtB;
         RenderTexture dst = aIsCurrent ? rtB : rtA;
 
-        BuildDentArrays();
-        BuildIslandArray();
+        using (MarkerDentArrays.Auto()) BuildDentArrays();
+        using (MarkerIslands.Auto()) BuildIslandArray();
+
+        MarkerUpload.Begin();
 
         bool flipY = overrideFlipY ? flipYValue : SystemInfo.graphicsUVStartsAtTop;
 
@@ -273,8 +331,18 @@ public class DentManager : MonoBehaviour
         stampInstance.SetVectorArray(DentBulgeID, dentBulge);
         stampInstance.SetVectorArray(DentDecayID, dentDecay);
         stampInstance.SetInt(DentCountID, ActiveDentCount);
-        stampInstance.SetVectorArray(IslandPushID, islandPush);
-        stampInstance.SetInt(IslandCountID, Mathf.Min(generator.IslandCount, MAX_ISLANDS));
+
+        // Skipping the count is enough to disable the blend: the shader only reads
+        // _IslandPush for ids below it, so the array upload can be skipped too.
+        if (islandRigidity > 0f)
+        {
+            stampInstance.SetVectorArray(IslandPushID, islandPush);
+            stampInstance.SetInt(IslandCountID, Mathf.Min(generator.IslandCount, MAX_ISLANDS));
+        }
+        else
+        {
+            stampInstance.SetInt(IslandCountID, 0);
+        }
         stampInstance.SetTexture(PrevTexID, src);
         stampInstance.SetFloat(DecayID, CurrentDecay);
         stampInstance.SetFloat(DecayDepthBiasID, Mathf.Max(decayDepthBias, 0f));
@@ -292,6 +360,10 @@ public class DentManager : MonoBehaviour
         aIsCurrent = !aIsCurrent;
 
         characterMaterial.SetTexture(DentTextureID, dst);
+
+        sinceLastStamp = 0f;
+
+        MarkerUpload.End();
     }
 
     /// <summary>
@@ -319,6 +391,89 @@ public class DentManager : MonoBehaviour
 
             active.Add(s);
         }
+
+        SnapshotSources();
+    }
+
+    /// <summary>Copies each active source's state out of its component, once per frame.</summary>
+    void SnapshotSources()
+    {
+        for (int i = 0; i < active.Count; i++)
+        {
+            var s = active[i];
+            Transform t = s.transform;
+
+            snapshots[i] = new SourceSnapshot
+            {
+                position = t.position,
+                axis = t.forward,   // +Z is the press direction
+                right = t.right,    // orients the Square cross-section
+                shape = s.shape,
+                depth = Mathf.Max(s.depth, 0.0001f),
+                inner = s.SafeInnerRadius,
+                outer = s.SafeOuterRadius,
+                flatten = Mathf.Clamp01(s.flattenScale),
+                strength = s.strength,
+                spread = s.EffectiveSpread,
+                rimBulge = s.rimBulge,
+                bulgeReach = Mathf.Max(s.bulgeReach, 1f),
+                bulgeNormalBias = Mathf.Clamp01(s.bulgeNormalBias),
+                bulgeOutward = Mathf.Clamp01(s.bulgeOutward),
+                bulgeRadius = Mathf.Max(s.bulgeRadius, 0f),
+                bulgeClamp = Mathf.Max(s.bulgeClamp, 0f),
+                decayMultiplier = Mathf.Max(s.decayMultiplier, 0f),
+                planeCurvature = s.planeCurvature,
+                planeEdgeSoftness = Mathf.Max(Mathf.Clamp01(s.planeEdgeSoftness), 0.001f),
+                planeOffset = s.planeOffset
+            };
+        }
+    }
+
+    /// <summary>
+    /// Transforms every island sample into world space once. Both sampling passes walk the
+    /// same points, so doing it per pass meant running the whole matrix multiply twice.
+    /// </summary>
+    void CacheSampleWorldPositions()
+    {
+        sampleIslandCount = 0;
+        if (generator == null || generator.IslandSamples == null) return;
+
+        int islands = Mathf.Min(generator.IslandCount, MAX_ISLANDS);
+
+        int total = 0;
+        for (int i = 0; i < islands; i++) total += generator.IslandSamples[i].Length;
+
+        if (sampleWorld == null || sampleWorld.Length < total)
+            sampleWorld = new Vector3[Mathf.Max(total, 64)];
+
+        // One matrix read instead of a transform call per point.
+        Matrix4x4 localToWorld = targetRenderer.transform.localToWorldMatrix;
+
+        int w = 0;
+        for (int i = 0; i < islands; i++)
+        {
+            sampleStart[i] = w;
+
+            Vector3[] samples = generator.IslandSamples[i];
+            for (int k = 0; k < samples.Length; k++)
+                sampleWorld[w++] = localToWorld.MultiplyPoint3x4(samples[k]);
+        }
+
+        sampleStart[islands] = w;
+        sampleIslandCount = islands;
+    }
+
+    /// <summary>
+    /// Bulge driver per source: how deep it is pressed in, capped by its own clamp.
+    /// Resolved once, because it is otherwise recomputed for every source on every sample.
+    /// </summary>
+    void ResolveDrivers()
+    {
+        for (int i = 0; i < active.Count; i++)
+        {
+            float clamp = snapshots[i].bulgeClamp;
+            drivers[i] = clamp > 0f ? Mathf.Min(pressDepth[i], clamp) : pressDepth[i];
+        }
     }
 
     void BuildDentArrays()
@@ -327,30 +482,25 @@ public class DentManager : MonoBehaviour
 
         for (int i = 0; i < count; i++)
         {
-            var s = active[i];
-            Vector3 p = s.transform.position;
-            Vector3 axis = s.transform.forward;  // +Z is the press direction
-            Vector3 right = s.transform.right;   // orients the Square cross-section
+            ref readonly SourceSnapshot s = ref snapshots[i];
+            float driver = drivers[i];
 
-            dentPos[i]    = new Vector4(p.x, p.y, p.z, (float)s.shape);
-            dentAxis[i]   = new Vector4(axis.x, axis.y, axis.z, Mathf.Max(s.depth, 0.0001f));
-            dentRight[i]  = new Vector4(right.x, right.y, right.z, Mathf.Clamp01(s.flattenScale));
+            dentPos[i]    = new Vector4(s.position.x, s.position.y, s.position.z, (float)s.shape);
+            dentAxis[i]   = new Vector4(s.axis.x, s.axis.y, s.axis.z, s.depth);
+            dentRight[i]  = new Vector4(s.right.x, s.right.y, s.right.z, s.flatten);
             // Plane has no rim fillet and no spread, so its params slots carry its second
             // rectangle extent and its edge softness instead.
-            float paramW = s.shape == DentShape.Plane ? s.planeEdgeSoftness : s.EffectiveSpread;
-            dentParams[i] = new Vector4(s.SafeInnerRadius, s.SafeOuterRadius, s.strength, paramW);
-            dentBulge[i]  = new Vector4(s.rimBulge, Mathf.Max(s.bulgeReach, 1f),
-                                        Mathf.Clamp01(s.bulgeNormalBias), DriverFor(i));
+            float paramW = s.shape == DentShape.Plane ? s.planeEdgeSoftness : s.spread;
+            dentParams[i] = new Vector4(s.inner, s.outer, s.strength, paramW);
+            dentBulge[i]  = new Vector4(s.rimBulge, s.bulgeReach, s.bulgeNormalBias, driver);
             // Plane repurposes the spare decay slots to place its rectangle relative to
             // the source. Punch shapes use one of them to size their bulge ring.
             dentDecay[i] = s.shape == DentShape.Plane
-                ? new Vector4(Mathf.Max(s.decayMultiplier, 0f), s.planeOffset.x, s.planeOffset.y,
-                              s.planeCurvature)
-                : new Vector4(Mathf.Max(s.decayMultiplier, 0f), Mathf.Max(s.bulgeRadius, 0f),
-                              Mathf.Clamp01(s.bulgeOutward), 0f);
+                ? new Vector4(s.decayMultiplier, s.planeOffset.x, s.planeOffset.y, s.planeCurvature)
+                : new Vector4(s.decayMultiplier, s.bulgeRadius, s.bulgeOutward, 0f);
 
             // Fed back purely so the Plane gizmo can draw its real splay height.
-            s.lastPressDepth = DriverFor(i);
+            active[i].lastPressDepth = driver;
         }
 
         for (int i = count; i < MAX_DENTS; i++)
@@ -374,21 +524,27 @@ public class DentManager : MonoBehaviour
     /// </summary>
     void BuildIslandArray()
     {
+        // At zero rigidity the shader does lerp(perVertex, islandPush, 0), which is exactly
+        // perVertex - so every push computed here would be multiplied out to nothing. This
+        // is the most expensive pass in the system, so it is worth not running it at all.
+        if (islandRigidity <= 0f) return;
+
         int count = Mathf.Min(generator.IslandCount, MAX_ISLANDS);
-        Transform tr = targetRenderer.transform;
+
+        // One matrix read, rather than a transform call per island.
+        Matrix4x4 worldToLocal = targetRenderer.transform.worldToLocalMatrix;
 
         for (int i = 0; i < count; i++)
         {
-            Vector3[] samples = generator.IslandSamples[i];
-
             Vector3 bestPushWS = Vector3.zero;
             float bestMagSq = 0f;
 
-            for (int s = 0; s < samples.Length; s++)
+            int from = sampleStart[i];
+            int to = sampleStart[i + 1];
+
+            for (int k = from; k < to; k++)
             {
-                // Island pushes drive whole rigid parts, where the rim bulge is not
-                // meaningful, so a zero normal is passed deliberately.
-                Vector3 pushWS = EvaluateDentWorld(tr.TransformPoint(samples[s]), Vector3.zero, out _);
+                Vector3 pushWS = EvaluatePressWorld(sampleWorld[k]);
                 float magSq = pushWS.sqrMagnitude;
                 if (magSq > bestMagSq)
                 {
@@ -397,7 +553,7 @@ public class DentManager : MonoBehaviour
                 }
             }
 
-            Vector3 pushOS = tr.InverseTransformDirection(bestPushWS);
+            Vector3 pushOS = worldToLocal.MultiplyVector(bestPushWS);
 
             // Rigidity ramps with island size: small detail parts move as a block, large
             // ones bend to the stamp, and everything between blends rather than snapping
@@ -430,74 +586,129 @@ public class DentManager : MonoBehaviour
     /// </summary>
     void ComputePressDepths()
     {
-        Transform tr = targetRenderer.transform;
-
         for (int i = 0; i < active.Count; i++) pressDepth[i] = 0f;
 
-        if (generator == null || generator.IslandSamples == null) return;
+        int total = sampleIslandCount > 0 ? sampleStart[sampleIslandCount] : 0;
 
-        int islands = Mathf.Min(generator.IslandCount, MAX_ISLANDS);
-
-        for (int island = 0; island < islands; island++)
+        // Source-outer, sample-inner: the snapshot is then loaded once per source rather
+        // than once per sample, and the inner loop touches nothing but plain memory.
+        for (int i = 0; i < active.Count; i++)
         {
-            Vector3[] samples = generator.IslandSamples[island];
-            for (int s = 0; s < samples.Length; s++)
+            ref readonly SourceSnapshot s = ref snapshots[i];
+            float deepest = 0f;
+
+            for (int k = 0; k < total; k++)
             {
-                Vector3 world = tr.TransformPoint(samples[s]);
-                for (int i = 0; i < active.Count; i++)
-                {
-                    float pen = Penetration(active[i], world);
-                    if (pen > pressDepth[i]) pressDepth[i] = pen;
-                }
+                float pen = Penetration(in s, sampleWorld[k]);
+                if (pen > deepest) deepest = pen;
             }
+
+            pressDepth[i] = deepest;
         }
     }
 
-    /// <summary>
-    /// Bulge driver for a source: how deep it is pressed in, capped by its own clamp.
-    /// Without the clamp a single long protrusion dipping deep inflates the bulge across
-    /// the whole object.
-    /// </summary>
-    float DriverFor(int sourceIndex)
-    {
-        float clamp = active[sourceIndex].bulgeClamp;
-        float depth = pressDepth[sourceIndex];
-        return clamp > 0f ? Mathf.Min(depth, clamp) : depth;
-    }
+    /// <summary>Bulge driver for a source, resolved once per frame by ResolveDrivers.</summary>
+    float DriverFor(int sourceIndex) => drivers[sourceIndex];
 
     /// <summary>How far a world point sits inside a source's contact surface.</summary>
-    static float Penetration(DentSource s, Vector3 worldPos)
+    static float Penetration(in SourceSnapshot s, Vector3 worldPos)
     {
-        Vector3 axis = s.transform.forward;
-        Vector3 right = s.transform.right;
-        Vector3 toPoint = worldPos - s.transform.position;
+        Vector3 toPoint = worldPos - s.position;
+        float axial = Vector3.Dot(toPoint, s.axis);
 
-        float outer = s.SafeOuterRadius;
-        float axial = Vector3.Dot(toPoint, axis);
+        // A contact surface never sits in FRONT of the source, so nothing in front of it
+        // can be inside the stamp. One dot product rejects roughly half the samples on a
+        // resting character before any of the shape maths runs.
+        if (axial >= 0f) return 0f;
+
+        return ComputePenetration(in s, toPoint, axial, out _);
+    }
+
+    /// <summary>
+    /// How far a point sits inside one source's contact surface, and how much the plane's
+    /// soft edge attenuates it. Shared by every path so the shape maths exists once.
+    /// </summary>
+    static float ComputePenetration(in SourceSnapshot s, Vector3 toPoint, float axial,
+                                    out float planeEdge)
+    {
+        planeEdge = 1f;
 
         float lat;
+        Vector3 up = Vector3.Cross(s.axis, s.right);
+
         if (s.shape == DentShape.Square || s.shape == DentShape.Plane)
         {
-            Vector3 up = Vector3.Cross(axis, right);
-            lat = Mathf.Max(Mathf.Abs(Vector3.Dot(toPoint, right)),
+            lat = Mathf.Max(Mathf.Abs(Vector3.Dot(toPoint, s.right)),
                             Mathf.Abs(Vector3.Dot(toPoint, up)));
         }
         else
         {
-            lat = Vector3.ProjectOnPlane(toPoint, axis).magnitude;
+            lat = (toPoint - axial * s.axis).magnitude;
         }
 
         float surfaceAxial;
+
         if (s.shape == DentShape.Plane)
         {
-            surfaceAxial = lat <= outer ? 0f : -1e9f;
+            float fromX = Vector3.Dot(toPoint, s.right);
+            float fromY = Vector3.Dot(toPoint, up);
+
+            float lx = Mathf.Abs(fromX - s.planeOffset.x);
+            float ly = Mathf.Abs(fromY - s.planeOffset.y);
+
+            // Second-order surface; zero curvature leaves it perfectly flat.
+            float curved = -0.5f * s.planeCurvature * (fromX * fromX + fromY * fromY);
+            surfaceAxial = (lx <= s.inner && ly <= s.outer) ? curved : -1e9f;
+
+            float soft = s.planeEdgeSoftness;
+            float sx = 1f - SmoothStep01(s.inner * (1f - soft), s.inner, lx);
+            float sy = 1f - SmoothStep01(s.outer * (1f - soft), s.outer, ly);
+            planeEdge = sx * sy;
         }
         else
         {
-            surfaceAxial = DentSurfaceAxial(lat, s.SafeInnerRadius, outer);
+            surfaceAxial = DentSurfaceAxial(lat, s.inner, s.outer);
         }
 
-        return Mathf.Clamp(surfaceAxial - axial, 0f, Mathf.Max(s.depth, 0.0001f));
+        float penetration = Mathf.Clamp(surfaceAxial - axial, 0f, s.depth);
+        return penetration;
+    }
+
+    /// <summary>
+    /// Press only, with no bulge or spread.
+    ///
+    /// Island pushes translate a whole rigid part, so bulge and splay mean nothing there -
+    /// which is why a zero normal is passed for them. Computing the full displacement and
+    /// then discarding most of it was making this pass several times more expensive than
+    /// the press metrics pass that walks exactly the same points.
+    /// </summary>
+    Vector3 EvaluatePressWorld(Vector3 worldPos)
+    {
+        Vector3 pressAccum = Vector3.zero;
+
+        for (int i = 0; i < active.Count; i++)
+        {
+            ref readonly SourceSnapshot s = ref snapshots[i];
+
+            Vector3 toPoint = worldPos - s.position;
+            float axial = Vector3.Dot(toPoint, s.axis);
+            if (axial >= 0f) continue;
+
+            float penetration = ComputePenetration(in s, toPoint, axial, out float planeEdge);
+            if (penetration <= 0f) continue;
+
+            float push = penetration * (1f - s.flatten) * planeEdge;
+
+            // Constraint accumulation: add only the part not already covered along this
+            // axis, so parallel stamps do not stack but perpendicular ones both apply.
+            float wanted = push * s.strength;
+            float already = Vector3.Dot(pressAccum, s.axis);
+            float extra = Mathf.Max(wanted - already, 0f);
+
+            pressAccum += s.axis * extra;
+        }
+
+        return pressAccum;
     }
 
     Vector3 EvaluateDentWorld(Vector3 worldPos, Vector3 worldNormal, out float decayMul)
@@ -511,13 +722,14 @@ public class DentManager : MonoBehaviour
 
         for (int i = 0; i < active.Count; i++)
         {
-            var s = active[i];
-            Vector3 axis = s.transform.forward;
-            Vector3 right = s.transform.right;
-            Vector3 toPoint = worldPos - s.transform.position;
+            ref readonly SourceSnapshot s = ref snapshots[i];
 
-            float inner = s.SafeInnerRadius;
-            float outer = s.SafeOuterRadius;
+            Vector3 axis = s.axis;
+            Vector3 right = s.right;
+            Vector3 toPoint = worldPos - s.position;
+
+            float inner = s.inner;
+            float outer = s.outer;
             float axial = Vector3.Dot(toPoint, axis);
 
             // Component across the axis: the round cross-section distance, and the
@@ -567,7 +779,7 @@ public class DentManager : MonoBehaviour
 
                 surfaceAxial = (lx <= halfX && ly <= halfY) ? curved : -1e9f;
 
-                float soft = Mathf.Max(Mathf.Clamp01(s.planeEdgeSoftness), 0.001f);
+                float soft = s.planeEdgeSoftness;
                 float sx = 1f - SmoothStep01(halfX * (1f - soft), halfX, lx);
                 float sy = 1f - SmoothStep01(halfY * (1f - soft), halfY, ly);
                 planeEdge = sx * sy;
@@ -577,25 +789,26 @@ public class DentManager : MonoBehaviour
                 surfaceAxial = DentSurfaceAxial(lat, innerEff, outer);
             }
 
-            float penetration = Mathf.Clamp(surfaceAxial - axial, 0f, Mathf.Max(s.depth, 0.0001f));
-            float push = penetration * (1f - Mathf.Clamp01(s.flattenScale)) * planeEdge;
+            float penetration = Mathf.Clamp(surfaceAxial - axial, 0f, s.depth);
+            float push = penetration * (1f - s.flatten) * planeEdge;
 
             // Sideways spread, inside the contact, peaking around the inner radius.
             float peak = Mathf.Max(innerEff, outer * 0.15f);
             float rampIn = SmoothStep01(0f, peak, lat);
             float rampOut = 1f - SmoothStep01(peak, outer, lat);
-            float bulge = push * s.EffectiveSpread * rampIn * rampOut;
+            float bulge = push * s.spread * rampIn * rampOut;
 
             // Rim bulge / splay.
             float rim;
             Vector3 rimDir;
 
+            float driver = drivers[i];
+
             if (s.shape == DentShape.Plane)
             {
                 // Resting on a hard surface: the squashed volume splays outward just above
                 // the plane and never crosses it.
-                float driver = DriverFor(i);
-                float height = Mathf.Max(driver * Mathf.Max(s.bulgeReach, 1f), 1e-5f);
+                float height = Mathf.Max(driver * s.bulgeReach, 1e-5f);
                 float above = axial > 0f ? 1f - SmoothStep01(0f, height, axial) : 0f;
 
                 rim = driver * s.rimBulge * above * planeEdge;
@@ -605,17 +818,15 @@ public class DentManager : MonoBehaviour
             {
                 // A punch: the pile straddles the contact plane rather than sitting only
                 // on the approach side.
-                float driver = DriverFor(i);
                 float ringRadius = s.bulgeRadius > 1e-5f ? s.bulgeRadius : outer;
-                float reach = Mathf.Max(s.bulgeReach, 1f);
                 float axialProf = 1f - SmoothStep01(0f, Mathf.Max(driver, 1e-5f), Mathf.Abs(axial));
                 float rimIn = SmoothStep01(innerEff, ringRadius, lat);
-                float rimOut = 1f - SmoothStep01(ringRadius, ringRadius * reach, lat);
+                float rimOut = 1f - SmoothStep01(ringRadius, ringRadius * s.bulgeReach, lat);
 
-                rim = driver * s.rimBulge * rimIn * rimOut * axialProf * (1f - Mathf.Clamp01(s.flattenScale));
+                rim = driver * s.rimBulge * rimIn * rimOut * axialProf * (1f - s.flatten);
 
-                Vector3 punchDir = Vector3.Lerp(-axis, worldNormal, Mathf.Clamp01(s.bulgeNormalBias));
-                rimDir = Vector3.Lerp(punchDir, outward, Mathf.Clamp01(s.bulgeOutward));
+                Vector3 punchDir = Vector3.Lerp(-axis, worldNormal, s.bulgeNormalBias);
+                rimDir = Vector3.Lerp(punchDir, outward, s.bulgeOutward);
                 if (rimDir.sqrMagnitude > 1e-8f) rimDir.Normalize();
             }
 
@@ -644,7 +855,7 @@ public class DentManager : MonoBehaviour
             if (extra > deepestPress)
             {
                 deepestPress = extra;
-                decayMul = Mathf.Max(s.decayMultiplier, 0f);
+                decayMul = s.decayMultiplier;
             }
         }
 
@@ -689,7 +900,7 @@ public class DentManager : MonoBehaviour
         Vector3 perVertexOS = tr.InverseTransformDirection(
             EvaluateDentWorld(tr.TransformPoint(localPos), worldNormal, out decayMul));
 
-        if (islandId < 0 || islandId >= MAX_ISLANDS) return perVertexOS;
+        if (islandId < 0 || islandId >= MAX_ISLANDS || islandRigidity <= 0f) return perVertexOS;
 
         Vector4 island = islandPush[islandId];
         return Vector3.Lerp(perVertexOS,
@@ -698,7 +909,7 @@ public class DentManager : MonoBehaviour
     }
 
     /// <summary>Same base decay factor the stamp shader uses this frame.</summary>
-    public float CurrentDecay => Mathf.Pow(1f - decayPerSecond, Time.deltaTime);
+    public float CurrentDecay => Mathf.Pow(1f - decayPerSecond, Mathf.Max(sinceLastStamp, 1e-5f));
 
     /// <summary>
     /// Effective decay for one accumulated value, matching the stamp shader: the source's

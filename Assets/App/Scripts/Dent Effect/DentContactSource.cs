@@ -133,12 +133,16 @@ public class DentContactSource : MonoBehaviour
 
     struct Contact
     {
+        public DentShape shape;    // Plane for flat faces, Capsule for curved ones
         public Vector3 point;      // on the real surface
         public Vector3 pressAxis;  // from the surface INTO the character
         public Vector3 right;      // in-plane basis the extents are measured along
         public float sink;         // how far the visible mesh overlaps the surface
+        public float radius;       // Capsule only: radius of the surface it sits on
+        public float bulgeRadius;  // Capsule only: radius of the contact patch
 
-        // Signed extents relative to 'point'. Exact for a box, probed otherwise.
+        // Signed extents relative to 'point'. Plane only - a curved surface tapers off on
+        // its own, so it needs no rectangle and no edge probing.
         public float minX, maxX, minY, maxY;
         public bool hasExtents;
     }
@@ -153,10 +157,13 @@ public class DentContactSource : MonoBehaviour
     /// </summary>
     class Tracked
     {
+        public DentShape shape;
         public Vector3 point;
         public Vector3 pressAxis;
         public Vector3 right;
         public float sink;
+        public float radius;
+        public float bulgeRadius;
         public float weight;       // 0..1, fades in and out
 
         // Signed extents in the plane's own basis, measured from the contact point.
@@ -233,6 +240,8 @@ public class DentContactSource : MonoBehaviour
             if (col.transform.IsChildOf(transform)) continue;
 
             if (col is BoxCollider box) ProbeBox(box, centre, mergeDot);
+            else if (col is SphereCollider sphere) ProbeSphere(sphere, centre, mergeDot);
+            else if (col is CapsuleCollider capsule) ProbeCapsule(capsule, centre, mergeDot);
             else needsRaycastPass = true;
         }
 
@@ -336,6 +345,7 @@ public class DentContactSource : MonoBehaviour
             // The face rectangle, relative to that point. Exact, no probing.
             var contact = new Contact
             {
+                shape = DentShape.Plane,
                 point = point,
                 pressAxis = normal,
                 right = right,
@@ -351,7 +361,99 @@ public class DentContactSource : MonoBehaviour
         }
     }
 
-    /// <summary>Fallback sampling for geometry that cannot be solved directly.</summary>
+    /// <summary>
+    /// Sphere against sphere, solved exactly.
+    ///
+    /// The Capsule stamp's contact surface is -R + sqrt(R^2 - lat^2) - a hemisphere with its
+    /// tip at the origin, curving away behind it. Put that origin on the collider's surface
+    /// facing the character and the stamp IS the sphere, with no approximation and no
+    /// sampling. A curved surface also tapers to nothing on its own, so unlike a flat face
+    /// it needs no rectangle and no edge probing.
+    /// </summary>
+    void ProbeSphere(SphereCollider sphere, Vector3 centre, float mergeDot)
+    {
+        Transform st = sphere.transform;
+        Vector3 scale = st.lossyScale;
+
+        // Unity scales a sphere collider by the largest axis.
+        float radius = sphere.radius * Mathf.Max(Mathf.Abs(scale.x),
+                                                 Mathf.Max(Mathf.Abs(scale.y), Mathf.Abs(scale.z)));
+
+        AddCurvedContact(st.TransformPoint(sphere.center), radius, centre, mergeDot);
+    }
+
+    /// <summary>
+    /// Capsule against sphere. The closest point on the capsule's axis acts as the centre of
+    /// a sphere of its radius, which is exact around the barrel. Along the axis a capsule is
+    /// straight where this treats it as curved, so long capsules read slightly rounder than
+    /// they are - usually invisible at contact scale.
+    /// </summary>
+    void ProbeCapsule(CapsuleCollider capsule, Vector3 centre, float mergeDot)
+    {
+        Transform ct = capsule.transform;
+        Vector3 scale = ct.lossyScale;
+
+        int dir = capsule.direction;   // 0 = X, 1 = Y, 2 = Z
+
+        // Radius scales with the two axes across the capsule, height with the one along it.
+        float radiusScale = dir == 0 ? Mathf.Max(Mathf.Abs(scale.y), Mathf.Abs(scale.z))
+                          : dir == 1 ? Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.z))
+                                     : Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y));
+
+        float radius = capsule.radius * radiusScale;
+        float height = capsule.height * Mathf.Abs(scale[dir]);
+
+        Vector3 axis = dir == 0 ? ct.right : dir == 1 ? ct.up : ct.forward;
+        Vector3 mid = ct.TransformPoint(capsule.center);
+
+        // The segment between the two cap centres.
+        float halfSpan = Mathf.Max(height * 0.5f - radius, 0f);
+        Vector3 a = mid - axis * halfSpan;
+        Vector3 b = mid + axis * halfSpan;
+
+        AddCurvedContact(ClosestPointOnSegment(a, b, centre), radius, centre, mergeDot);
+    }
+
+    void AddCurvedContact(Vector3 surfaceCentre, float radius, Vector3 centre, float mergeDot)
+    {
+        Vector3 toCharacter = centre - surfaceCentre;
+        float distance = toCharacter.magnitude;
+        if (distance < 1e-4f) return;   // concentric, no meaningful direction
+
+        Vector3 normal = toCharacter / distance;
+
+        // Gap between the two surfaces; negative once they overlap.
+        float sink = visualRadius - (distance - radius);
+        if (sink < minSink) return;
+
+        MergeOrAdd(new Contact
+        {
+            shape = DentShape.Capsule,
+            point = surfaceCentre + normal * radius,
+            pressAxis = normal,
+            radius = radius,
+            sink = sink,
+
+            // Radius of the contact patch, from the effective radius of two touching
+            // spheres. The bulge ring needs to sit at the size of the patch, not the size
+            // of the surface - on a large sphere those differ by an order of magnitude.
+            bulgeRadius = Mathf.Sqrt(Mathf.Max(2f * (radius * visualRadius) /
+                                               (radius + visualRadius) * sink, 0f)),
+
+            hasExtents = false
+        }, mergeDot);
+    }
+
+    static Vector3 ClosestPointOnSegment(Vector3 a, Vector3 b, Vector3 point)
+    {
+        Vector3 ab = b - a;
+        float lengthSq = ab.sqrMagnitude;
+        if (lengthSq < 1e-8f) return a;
+
+        float t = Mathf.Clamp01(Vector3.Dot(point - a, ab) / lengthSq);
+        return a + ab * t;
+    }
+
     void ProbeByRays(Vector3 centre, float mergeDot)
     {
         for (int i = 0; i < directions.Length; i++)
@@ -360,8 +462,9 @@ public class DentContactSource : MonoBehaviour
                                  surfaceMask, QueryTriggerInteraction.Ignore))
                 continue;
 
-            // Boxes were already handled exactly.
-            if (hit.collider is BoxCollider) continue;
+            // Boxes and rounded primitives were already handled exactly.
+            if (hit.collider is BoxCollider || hit.collider is SphereCollider
+                || hit.collider is CapsuleCollider) continue;
 
             float sink = visualRadius - hit.distance;
             if (sink < minSink) continue;
@@ -370,6 +473,7 @@ public class DentContactSource : MonoBehaviour
             // is exactly the Plane stamp's press axis: from the surface into the character.
             MergeOrAdd(new Contact
             {
+                shape = DentShape.Plane,
                 point = hit.point,
                 pressAxis = hit.normal,
                 sink = sink,
@@ -425,9 +529,12 @@ public class DentContactSource : MonoBehaviour
 
                 match = new Tracked
                 {
+                    shape = contact.shape,
                     point = contact.point,
                     pressAxis = contact.pressAxis,
                     right = contact.right,
+                    radius = contact.radius,
+                    bulgeRadius = contact.bulgeRadius,
                     sink = contact.sink,
                     weight = 0f
                 };
@@ -437,16 +544,22 @@ public class DentContactSource : MonoBehaviour
             {
                 float k = surfaceSmoothing > 0f ? 1f - Mathf.Exp(-dt / surfaceSmoothing) : 1f;
 
+                match.shape = contact.shape;
                 match.point = Vector3.Lerp(match.point, contact.point, k);
                 match.pressAxis = Vector3.Slerp(match.pressAxis, contact.pressAxis, k).normalized;
                 match.sink = Mathf.Lerp(match.sink, contact.sink, k);
+                match.radius = Mathf.Lerp(match.radius, contact.radius, k);
+                match.bulgeRadius = Mathf.Lerp(match.bulgeRadius, contact.bulgeRadius, k);
 
                 if (contact.hasExtents)
                     match.right = Vector3.Slerp(match.right, contact.right, k).normalized;
             }
 
             match.seenThisFrame = true;
-            UpdateExtents(match, contact, cap, dt);
+
+            // A curved surface tapers off on its own, so it needs no rectangle.
+            if (contact.shape == DentShape.Plane)
+                UpdateExtents(match, contact, cap, dt);
         }
 
         for (int t = tracked.Count - 1; t >= 0; t--)
@@ -586,6 +699,24 @@ public class DentContactSource : MonoBehaviour
 
             if (!src.gameObject.activeSelf) src.gameObject.SetActive(true);
 
+            if (s.shape == DentShape.Capsule)
+            {
+                // The stamp's own curve matches the surface, so it sits right on the
+                // contact point and needs no rectangle, offset or basis.
+                src.transform.SetPositionAndRotation(s.point, LookAlong(s.pressAxis));
+
+                src.shape = DentShape.Capsule;
+                src.outerRadius = Mathf.Max(s.radius, 0.0001f);
+                src.bulgeRadius = s.bulgeRadius;
+
+                // A surface the character rests ON, so the displaced material has to splay
+                // outward. Punch semantics would push it along -Z, straight into the sphere.
+                src.bulgeOutward = 1f;
+
+                ApplyCommonSettings(src, s.sink, s.weight);
+                continue;
+            }
+
             // The source sits directly under the character, projected onto the contact
             // plane. That matters twice over: the splay radiates outward from the source,
             // and DentManager's range check measures from it. The rectangle is placed
@@ -640,7 +771,13 @@ public class DentContactSource : MonoBehaviour
         src.innerRadius = halfX;
         src.outerRadius = halfY;
         src.planeEdgeSoftness = planeEdgeSoftness;
+        src.bulgeRadius = 0f;   // planes size their splay from the surface itself
 
+        ApplyCommonSettings(src, sink, weight);
+    }
+
+    void ApplyCommonSettings(DentSource src, float sink, float weight)
+    {
         // Just past the actual sink, so the press can always reach its contact surface
         // without the source claiming a huge radius in DentManager's bounds filter.
         src.depth = Mathf.Max(sink * 1.5f, 0.01f);
@@ -682,6 +819,13 @@ public class DentContactSource : MonoBehaviour
             Gizmos.color = new Color(1f, 1f, 0f, Mathf.Max(s.weight, 0.15f));
             Gizmos.DrawSphere(s.point, 0.03f);
             Gizmos.DrawLine(s.point, s.point + s.pressAxis * 0.3f);
+
+            if (s.shape == DentShape.Capsule)
+            {
+                // The surface this stamp is matching, drawn where it actually curves.
+                Gizmos.DrawWireSphere(s.point - s.pressAxis * s.radius, s.radius);
+                continue;
+            }
 
             // The measured rectangle, so it is obvious where the surface is believed to end.
             Vector3 right = s.right.sqrMagnitude > 0.5f

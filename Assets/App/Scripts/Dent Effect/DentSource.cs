@@ -112,6 +112,19 @@ public class DentSource : MonoBehaviour
              "extent. Lets the mesh bend over a ledge instead of shearing off at a hard line.")]
     [Range(0.01f, 0.9f)] public float planeEdgeSoftness = 0.2f;
 
+    [Tooltip("Punch shapes only. Radius the bulge ring sits at. 0 uses the outer radius.\n\n" +
+             "Worth setting when the stamp's own radius is much larger than the area it " +
+             "actually touches - resting on a big sphere, for instance, where the ring would " +
+             "otherwise peak far outside the contact patch and read as almost no bulge.")]
+    public float bulgeRadius = 0f;
+
+    [Tooltip("Punch shapes only. Which way the bulge moves.\n\n" +
+             "0 = back out of the press, along -Z. Right for something pressed INTO the " +
+             "mesh, where displaced material piles up behind the tool.\n\n" +
+             "1 = outward, away from the press axis. Right for a surface the mesh RESTS ON, " +
+             "where -Z points into the surface and would shove material through it.")]
+    [Range(0f, 1f)] public float bulgeOutward = 0f;
+
     [Tooltip("Multiplier on DentManager's decay rate for dents this stamp creates.\n" +
              "1 = the manager's rate. Above 1 fades faster, below 1 lingers.\n" +
              "0 makes this stamp's dents permanent regardless of the manager.")]

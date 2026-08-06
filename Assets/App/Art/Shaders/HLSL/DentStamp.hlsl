@@ -39,6 +39,14 @@
 //                    measured along the source's own +X and +Y. The source itself stays
 //                    under the character - it is what the splay radiates from and what
 //                    range checks measure - so the rectangle has to be placed separately.
+//                    For PUNCH shapes: y = radius the bulge ring sits at, 0 to use the
+//                    outer radius. A stamp matching a large curved surface has an outer
+//                    radius far bigger than the patch it actually touches, so the ring
+//                    would otherwise peak well outside the contact.
+//                    z = how far the bulge leans outward instead of back along -Z. A
+//                    punch pressed INTO the mesh piles material up behind itself, but a
+//                    curved surface the mesh RESTS ON has -Z pointing into the surface,
+//                    where pushing material would drive it straight through.
 //   _IslandPush[j] : xyz = OBJECT space rigid push for island j, w = rigidity 0..1
 //
 // Shape ids: 0 = Capsule, 1 = Cylinder, 2 = Square, 3 = Plane.
@@ -273,12 +281,17 @@ float3 EvaluateDentWorld(float3 WorldPos, float3 WorldNormal, out float DecayMul
             // A punch: displaced material piles up around the contact. The band is centred
             // ON the contact plane rather than sitting behind it, so the pile straddles the
             // surface instead of forming only on the approach side.
-            float axialProf = 1.0 - smoothstep(0.0, max(driver, 1e-5), abs(axial));
-            float rimIn     = smoothstep(innerEff, outer, lat);
-            float rimOut    = 1.0 - smoothstep(outer, outer * rimReach, lat);
+            float ringRadius = (_DentDecay[i].y > 1e-5) ? _DentDecay[i].y : outer;
+            float outwardMix = saturate(_DentDecay[i].z);
 
-            rim    = driver * rimAmt * rimIn * rimOut * axialProf * (1.0 - flatten);
-            rimDir = normalize(lerp(-axis, WorldNormal, rimBias) + 1e-6);
+            float axialProf = 1.0 - smoothstep(0.0, max(driver, 1e-5), abs(axial));
+            float rimIn     = smoothstep(innerEff, ringRadius, lat);
+            float rimOut    = 1.0 - smoothstep(ringRadius, ringRadius * rimReach, lat);
+
+            rim = driver * rimAmt * rimIn * rimOut * axialProf * (1.0 - flatten);
+
+            float3 punchDir = lerp(-axis, WorldNormal, rimBias);
+            rimDir = normalize(lerp(punchDir, outward, outwardMix) + 1e-6);
         }
 
         // --- combine ---

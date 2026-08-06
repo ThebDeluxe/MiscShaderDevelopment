@@ -345,10 +345,11 @@ public class DentManager : MonoBehaviour
             dentBulge[i]  = new Vector4(s.rimBulge, Mathf.Max(s.bulgeReach, 1f),
                                         Mathf.Clamp01(s.bulgeNormalBias), DriverFor(i));
             // Plane repurposes the spare decay slots to place its rectangle relative to
-            // the source, so the source can stay under the character.
+            // the source. Punch shapes use one of them to size their bulge ring.
             dentDecay[i] = s.shape == DentShape.Plane
                 ? new Vector4(Mathf.Max(s.decayMultiplier, 0f), s.planeOffset.x, s.planeOffset.y, 0f)
-                : new Vector4(Mathf.Max(s.decayMultiplier, 0f), 0f, 0f, 0f);
+                : new Vector4(Mathf.Max(s.decayMultiplier, 0f), Mathf.Max(s.bulgeRadius, 0f),
+                              Mathf.Clamp01(s.bulgeOutward), 0f);
 
             // Fed back purely so the Plane gizmo can draw its real splay height.
             s.lastPressDepth = DriverFor(i);
@@ -600,13 +601,16 @@ public class DentManager : MonoBehaviour
                 // A punch: the pile straddles the contact plane rather than sitting only
                 // on the approach side.
                 float driver = DriverFor(i);
+                float ringRadius = s.bulgeRadius > 1e-5f ? s.bulgeRadius : outer;
                 float reach = Mathf.Max(s.bulgeReach, 1f);
                 float axialProf = 1f - SmoothStep01(0f, Mathf.Max(driver, 1e-5f), Mathf.Abs(axial));
-                float rimIn = SmoothStep01(innerEff, outer, lat);
-                float rimOut = 1f - SmoothStep01(outer, outer * reach, lat);
+                float rimIn = SmoothStep01(innerEff, ringRadius, lat);
+                float rimOut = 1f - SmoothStep01(ringRadius, ringRadius * reach, lat);
 
                 rim = driver * s.rimBulge * rimIn * rimOut * axialProf * (1f - Mathf.Clamp01(s.flattenScale));
-                rimDir = Vector3.Lerp(-axis, worldNormal, Mathf.Clamp01(s.bulgeNormalBias));
+
+                Vector3 punchDir = Vector3.Lerp(-axis, worldNormal, Mathf.Clamp01(s.bulgeNormalBias));
+                rimDir = Vector3.Lerp(punchDir, outward, Mathf.Clamp01(s.bulgeOutward));
                 if (rimDir.sqrMagnitude > 1e-8f) rimDir.Normalize();
             }
 

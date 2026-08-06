@@ -347,7 +347,8 @@ public class DentManager : MonoBehaviour
             // Plane repurposes the spare decay slots to place its rectangle relative to
             // the source. Punch shapes use one of them to size their bulge ring.
             dentDecay[i] = s.shape == DentShape.Plane
-                ? new Vector4(Mathf.Max(s.decayMultiplier, 0f), s.planeOffset.x, s.planeOffset.y, 0f)
+                ? new Vector4(Mathf.Max(s.decayMultiplier, 0f), s.planeOffset.x, s.planeOffset.y,
+                              s.planeCurvature)
                 : new Vector4(Mathf.Max(s.decayMultiplier, 0f), Mathf.Max(s.bulgeRadius, 0f),
                               Mathf.Clamp01(s.bulgeOutward), 0f);
 
@@ -554,13 +555,20 @@ public class DentManager : MonoBehaviour
             {
                 Vector3 planeUp = Vector3.Cross(axis, right);
 
-                float lx = Mathf.Abs(Vector3.Dot(toPoint, right) - s.planeOffset.x);
-                float ly = Mathf.Abs(Vector3.Dot(toPoint, planeUp) - s.planeOffset.y);
+                // Measured from the source, which sits at the point of tangency.
+                float fromX = Vector3.Dot(toPoint, right);
+                float fromY = Vector3.Dot(toPoint, planeUp);
+
+                float lx = Mathf.Abs(fromX - s.planeOffset.x);
+                float ly = Mathf.Abs(fromY - s.planeOffset.y);
 
                 float halfX = inner;
                 float halfY = outer;
 
-                surfaceAxial = (lx <= halfX && ly <= halfY) ? 0f : -1e9f;
+                // Second-order surface; zero curvature leaves it perfectly flat.
+                float curved = -0.5f * s.planeCurvature * (fromX * fromX + fromY * fromY);
+
+                surfaceAxial = (lx <= halfX && ly <= halfY) ? curved : -1e9f;
 
                 float soft = Mathf.Max(Mathf.Clamp01(s.planeEdgeSoftness), 0.001f);
                 float sx = 1f - SmoothStep01(halfX * (1f - soft), halfX, lx);

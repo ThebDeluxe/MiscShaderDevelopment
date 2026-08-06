@@ -343,8 +343,11 @@ MonoBehaviour:
   bulgeReach: 1.15
   bulgeNormalBias: 0
   bulgeClamp: 0.3
+  planeCurvature: 0
   planeOffset: {x: 0, y: 0}
   planeEdgeSoftness: 0.2
+  bulgeRadius: 0
+  bulgeOutward: 0
   decayMultiplier: 2
 --- !u!1 &99469744
 GameObject:
@@ -362,7 +365,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 1
+  m_IsActive: 0
 --- !u!114 &99469745
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -386,8 +389,11 @@ MonoBehaviour:
   bulgeReach: 1.8
   bulgeNormalBias: 0
   bulgeClamp: 0.25
+  planeCurvature: 0
   planeOffset: {x: 0, y: 0}
   planeEdgeSoftness: 0.2
+  bulgeRadius: 0
+  bulgeOutward: 0
   decayMultiplier: 1
 --- !u!4 &99469746
 Transform:
@@ -683,6 +689,8 @@ MonoBehaviour:
     serializedVersion: 2
     m_Bits: 4294967295
   sampleDirections: 14
+  curvatureSampleSpread: 0.3
+  maxSurfaceRadius: 50
   mergeAngle: 25
   maxSources: 3
   minSink: 0.005
@@ -1098,8 +1106,11 @@ MonoBehaviour:
   bulgeReach: 1.15
   bulgeNormalBias: 0
   bulgeClamp: 0.3
+  planeCurvature: 0
   planeOffset: {x: 0, y: 0}
   planeEdgeSoftness: 0.2
+  bulgeRadius: 0
+  bulgeOutward: 0
   decayMultiplier: 2
 --- !u!1 &380082808
 GameObject:
@@ -1817,6 +1828,9 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 0e67731e978adb84e84ac6be435bf988, type: 3}
       insertIndex: 2
       addedObject: {fileID: 531405055}
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 0e67731e978adb84e84ac6be435bf988, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 531405058}
   m_SourcePrefab: {fileID: 100100000, guid: 0e67731e978adb84e84ac6be435bf988, type: 3}
 --- !u!1 &531405047 stripped
 GameObject:
@@ -1850,7 +1864,7 @@ MonoBehaviour:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 531405047}
-  m_Enabled: 1
+  m_Enabled: 0
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7757fb7f993e6c14bba1ba7cbbd8ab61, type: 3}
   m_Name: 
@@ -1869,698 +1883,123 @@ MonoBehaviour:
   colliderLayer: 0
   drawGizmos: 1
   gizmoColour: {r: 0.2, g: 0.9, b: 1, a: 0.35}
-  bindings:
-  - islandId: 0
-    restCentre: {x: -0.50641847, y: 1.8878616, z: -0.25504106}
-    restRadius: 0.35708958
-    restSpread: 0.362156
-    centreOffset: {x: 0.18582302, y: -0.024875998, z: -0.040838882}
-    members: 4e000000570000005c0000006000000065000000690000006b0000006d000000
-  - islandId: 0
-    restCentre: {x: -0.27508777, y: 2.3384614, z: 0.19302896}
-    restRadius: 0.33443204
-    restSpread: 0.34290063
-    centreOffset: {x: 0.11924061, y: -0.13720202, z: -0.04173608}
-    members: 070000000a00000013000000150000001b0000002b0000003c00000043000000
-  - islandId: 0
-    restCentre: {x: 0.30179363, y: 2.1788423, z: 0.32460997}
-    restRadius: 0.34238034
-    restSpread: 0.33291924
-    centreOffset: {x: -0.1389735, y: -0.13369203, z: -0.07328588}
-    members: 2200000025000000280000002d00000032000000380000003e00000045000000
-  - islandId: 0
-    restCentre: {x: -0.32597867, y: 1.8479745, z: 0.42998517}
-    restRadius: 0.38124245
-    restSpread: 0.38416988
-    centreOffset: {x: 0.009027034, y: -0.030159354, z: -0.2097314}
-    members: 340000003600000040000000470000004c00000051000000550000005b000000
-  - islandId: 0
-    restCentre: {x: -0.22300825, y: 2.3124454, z: -0.33630952}
-    restRadius: 0.32144967
-    restSpread: 0.27986223
-    centreOffset: {x: 0.101614326, y: -0.101135015, z: 0.116297334}
-    members: 000000000200000005000000080000000e000000540000005e00000067000000
-  - islandId: 0
-    restCentre: {x: 0.3325997, y: 2.2752242, z: -0.2591886}
-    restRadius: 0.3094441
-    restSpread: 0.32675424
-    centreOffset: {x: -0.084221214, y: -0.06003809, z: 0.1238648}
-    members: 0d000000190000001d000000200000007300000076000000fe00000002010000
-  - islandId: 0
-    restCentre: {x: -0.04594447, y: 1.7167583, z: -0.56233525}
-    restRadius: 0.3763947
-    restSpread: 0.34049627
-    centreOffset: {x: 0.15973757, y: -0.052403927, z: 0.18055362}
-    members: 70000000710000007f0000008200000084000000890000008e00000092000000
-  - islandId: 0
-    restCentre: {x: -0.2804326, y: 1.37633, z: 0.34475252}
-    restRadius: 0.34518158
-    restSpread: 0.3485256
-    centreOffset: {x: 0.16722593, y: 0.14178193, z: -0.016746312}
-    members: a5000000a9000000ac000000af000000b3000000b6000000b9000000bf000000
-  - islandId: 0
-    restCentre: {x: -0.36794704, y: 1.3560785, z: -0.26484275}
-    restRadius: 0.31452635
-    restSpread: 0.31424972
-    centreOffset: {x: 0.095777035, y: 0.12499869, z: 0.08432144}
-    members: 95000000980000009c0000009f000000a3000000bd000000c1000000c8000000
-  - islandId: 0
-    restCentre: {x: 0.2874341, y: 1.326839, z: -0.27578166}
-    restRadius: 0.33112726
-    restSpread: 0.38131258
-    centreOffset: {x: -0.08758995, y: 0.13319588, z: 0.024349242}
-    members: 850000008c000000cd000000d1000000d5000000d90000001401000018010000
-  - islandId: 0
-    restCentre: {x: 0.34943247, y: 1.5162506, z: 0.33622}
-    restRadius: 0.40941614
-    restSpread: 0.40344962
-    centreOffset: {x: -0.0981676, y: 0.13537073, z: -0.12848529}
-    members: c3000000df000000e3000000e7000000eb000000ef000000f3000000f8000000
-  - islandId: 0
-    restCentre: {x: 0.49058777, y: 1.7416757, z: -0.3126544}
-    restRadius: 0.32742485
-    restSpread: 0.33489126
-    centreOffset: {x: -0.14441514, y: -0.05187452, z: 0.100131154}
-    members: 790000007b0000008100000000010000080100000b0100000e01000011010000
-  - islandId: 1
-    restCentre: {x: -0.35097516, y: 0.9387044, z: 0.009475708}
-    restRadius: 0.15261479
-    restSpread: 0.15720747
-    centreOffset: {x: -0.057541132, y: -0.01855719, z: 0.044897925}
-    members: 1c0100002101000028010000670100006e010000eb010000f3010000f9010000
-  - islandId: 1
-    restCentre: {x: -0.35905138, y: 0.9155739, z: 0.18640193}
-    restRadius: 0.19091961
-    restSpread: 0.18450826
-    centreOffset: {x: -0.08459762, y: -0.024090469, z: -0.042703062}
-    members: 2501000030010000450100004e01000058010000740100008d0100009a010000
-  - islandId: 1
-    restCentre: {x: -0.45623246, y: 0.80944383, z: 0.10278961}
-    restRadius: 0.2614642
-    restSpread: 0.22551465
-    centreOffset: {x: 0.032994896, y: 0.114417315, z: 0.020723693}
-    members: 71010000810100009c010000b5010000c5010000da0100000202000010020000
-  - islandId: 1
-    restCentre: {x: -0.49741462, y: 0.9714746, z: 0.10937112}
-    restRadius: 0.19253525
-    restSpread: 0.18524262
-    centreOffset: {x: 0.050120145, y: -0.07671195, z: -0.012580603}
-    members: 2b0100003501000041010000510100005e010000aa010000b7010000d8010000
-  - islandId: 2
-    restCentre: {x: -0.90927494, y: 1.8086032, z: 0.11207949}
-    restRadius: 0.19072199
-    restSpread: 0.16738507
-    centreOffset: {x: -0.08790636, y: 0.011046052, z: 0.010823652}
-    members: 1f0200002d0200003c0200004a0200005902000068020000aa020000c3020000
-  - islandId: 2
-    restCentre: {x: -0.9536282, y: 1.7936033, z: 0.11189863}
-    restRadius: 0.20257631
-    restSpread: 0.17738158
-    centreOffset: {x: 0.076820016, y: 0.03782785, z: 0.030862466}
-    members: 6a0200008002000096020000ac020000db020000ec020000fe02000010030000
-  - islandId: 3
-    restCentre: {x: 0.40730476, y: 0.9242596, z: 0.025888324}
-    restRadius: 0.21531674
-    restSpread: 0.19352253
-    centreOffset: {x: 0.090177655, y: -0.053246796, z: -0.022916913}
-    members: 220300002c03000036030000440300005103000061030000a503000016040000
-  - islandId: 3
-    restCentre: {x: 0.4992961, y: 0.88438934, z: 0.014539911}
-    restRadius: 0.24717098
-    restSpread: 0.21452849
-    centreOffset: {x: -0.117176265, y: -0.031244397, z: 0.034632757}
-    members: 380300005f030000710300007d0300008903000094030000df030000f6030000
-  - islandId: 3
-    restCentre: {x: 0.44656497, y: 0.7942353, z: 0.008543615}
-    restRadius: 0.2096316
-    restSpread: 0.1974883
-    centreOffset: {x: -0.028470993, y: 0.08506632, z: -0.015896898}
-    members: 9b030000ab030000b6030000c0030000cb030000d9030000e803000004040000
-  - islandId: 4
-    restCentre: {x: 0.89506185, y: 1.8118392, z: 0.1097995}
-    restRadius: 0.21854207
-    restSpread: 0.19192901
-    centreOffset: {x: 0.10248846, y: -0.015954614, z: 0.049865622}
-    members: 2504000032040000400400004e0400005c040000690400008c04000004050000
-  - islandId: 4
-    restCentre: {x: 0.99780583, y: 1.774269, z: 0.039680004}
-    restRadius: 0.1621794
-    restSpread: 0.16278115
-    centreOffset: {x: -0.035692215, y: 0.013648629, z: 0.046595592}
-    members: 720400007d04000086040000900400009d040000ad040000c20400001f050000
-  - islandId: 4
-    restCentre: {x: 0.976783, y: 1.7854701, z: 0.16186081}
-    restRadius: 0.19371538
-    restSpread: 0.18025964
-    centreOffset: {x: -0.09051305, y: -0.009561777, z: -0.059010476}
-    members: 9c040000b0040000c0040000d1040000db040000e5040000f404000002050000
-  - islandId: 5
-    restCentre: {x: 0.019833071, y: 3.027016, z: 0.2621773}
-    restRadius: 0.14213955
-    restSpread: 0.13198034
-    centreOffset: {x: -0.0068918467, y: -0.011514664, z: -0.0786002}
-    members: 280500002f0500005505000059050000fb1d0000031e0000071e00000b1e0000
-  - islandId: 5
-    restCentre: {x: 0.14374734, y: 3.023515, z: 0.09008238}
-    restRadius: 0.16601871
-    restSpread: 0.16054025
-    centreOffset: {x: -0.06936741, y: -0.009498119, z: 0.048127525}
-    members: 390500003e0500004405000049050000ea1d0000ef1d0000f41d0000111e0000
-  - islandId: 5
-    restCentre: {x: 0.010075744, y: 2.7998648, z: 0.16986558}
-    restRadius: 0.18553817
-    restSpread: 0.18046826
-    centreOffset: {x: 0.005751554, y: 0.038972378, z: -0.08900392}
-    members: 290500002e0500004d050000530500005c050000610500006405000069050000
-  - islandId: 5
-    restCentre: {x: 0.0149682155, y: 2.7585404, z: 0.055081166}
-    restRadius: 0.22492677
-    restSpread: 0.19968069
-    centreOffset: {x: 0.022670092, y: -0.016455173, z: 0.103923544}
-    members: 300500003305000036050000420500006e050000770500007d05000082050000
-  - islandId: 5
-    restCentre: {x: -0.043248925, y: 3.0424821, z: 0.06832495}
-    restRadius: 0.19187976
-    restSpread: 0.18029414
-    centreOffset: {x: 0.052019183, y: -0.050469875, z: 0.057521857}
-    members: 3a0500006a050000740500007a050000f11d0000f91d0000021e0000141e0000
-  - islandId: 6
-    restCentre: {x: -0.5152058, y: 2.2839034, z: 0.45432654}
-    restRadius: 0.11461201
-    restSpread: 0.11395936
-    centreOffset: {x: -0.012479961, y: 0.041050434, z: -0.02561143}
-    members: 85050000920500009f050000af050000bc050000c9050000d605000075060000
-  - islandId: 6
-    restCentre: {x: -0.10080769, y: 2.4324446, z: 0.55349624}
-    restRadius: 0.1107661
-    restSpread: 0.13036539
-    centreOffset: {x: 0.010702468, y: 0.07505059, z: -0.043897808}
-    members: a2050000e4050000f0050000fc050000f8060000090700001507000020070000
-  - islandId: 6
-    restCentre: {x: -0.4443832, y: 1.9931983, z: 0.6327146}
-    restRadius: 0.09934644
-    restSpread: 0.1267606
-    centreOffset: {x: -0.020047307, y: -0.05881989, z: 0.031664073}
-    members: 3d060000500600005d0600006e06000081060000910600009e060000ab060000
-  - islandId: 6
-    restCentre: {x: -0.04694919, y: 2.0986753, z: 0.7356157}
-    restRadius: 0.099588566
-    restSpread: 0.13568553
-    centreOffset: {x: 0.036283415, y: -0.047026396, z: 0.04216367}
-    members: 01060000170600002706000037060000bd060000cd060000dd060000ed060000
-  - islandId: 7
-    restCentre: {x: 0.52916914, y: 2.0983737, z: 0.5352959}
-    restRadius: 0.09713622
-    restSpread: 0.094519995
-    centreOffset: {x: 0.04593858, y: -0.028330326, z: 0.0059657693}
-    members: 3207000040070000500700005e0700006d0700007f070000db070000fc070000
-  - islandId: 7
-    restCentre: {x: 0.18947412, y: 2.1899152, z: 0.6801882}
-    restRadius: 0.09825834
-    restSpread: 0.14625086
-    centreOffset: {x: -0.063988194, y: -0.015454054, z: 0.053923547}
-    members: 4b07000090070000a3070000b407000030080000440800005208000061080000
-  - islandId: 7
-    restCentre: {x: 0.3859159, y: 2.4006138, z: 0.47322613}
-    restRadius: 0.09824282
-    restSpread: 0.12635557
-    centreOffset: {x: 0.016007215, y: 0.061222076, z: -0.025932848}
-    members: af070000c5070000d3070000ea07000000080000100800001c08000027080000
-  - islandId: 8
-    restCentre: {x: -0.31916168, y: 1.8507518, z: 0.7066547}
-    restRadius: 0.0763822
-    restSpread: 0.09321161
-    centreOffset: {x: 0.05337286, y: 0.015470147, z: 0.014499664}
-    members: 77080000890800009f080000b2080000c5080000b7090000ca090000e2090000
-  - islandId: 8
-    restCentre: {x: -0.09143309, y: 1.8686453, z: 0.76094705}
-    restRadius: 0.090342365
-    restSpread: 0.09845408
-    centreOffset: {x: -0.0035383329, y: -0.043286562, z: 0.006676495}
-    members: d1080000e0080000ec080000f8080000bb0a0000c70a0000d30a0000df0a0000
-  - islandId: 8
-    restCentre: {x: 0.26553372, y: 1.8990228, z: 0.70256937}
-    restRadius: 0.07830499
-    restSpread: 0.104738146
-    centreOffset: {x: -0.040446967, y: 0.027778149, z: -0.025273025}
-    members: 1709000034090000470900005b090000400a0000550a0000690a00007c0a0000
-  - islandId: 8
-    restCentre: {x: -0.18846276, y: 1.8331364, z: 0.75024456}
-    restRadius: 0.08989538
-    restSpread: 0.09756797
-    centreOffset: {x: 0.0072351545, y: 0.04998207, z: -0.017490804}
-    members: 940800008f0900009c090000a5090000d5090000f4090000fe090000070a0000
-  - islandId: 8
-    restCentre: {x: 0.06540018, y: 1.8099804, z: 0.7647954}
-    restRadius: 0.09135603
-    restSpread: 0.09542998
-    centreOffset: {x: 0.017862905, y: 0.048360348, z: -0.027042627}
-    members: f9080000720900007d09000087090000130a00001d0a0000270a0000310a0000
-  - islandId: 8
-    restCentre: {x: 0.14144558, y: 1.8568668, z: 0.7608682}
-    restRadius: 0.08098302
-    restSpread: 0.10618735
-    centreOffset: {x: -0.00018902123, y: -0.061787844, z: 0.017222464}
-    members: fe0800000c090000160900002b090000820a0000990a0000a30a0000ac0a0000
-  - islandId: 9
-    restCentre: {x: 0.3975206, y: 1.7489073, z: -0.76324856}
-    restRadius: 0.15817294
-    restSpread: 0.16544883
-    centreOffset: {x: 0.034622997, y: 0.04782498, z: -0.066655755}
-    members: f40a0000fb0a0000050b00000e0b00001e0b0000270b00002f0b0000350b0000
-  - islandId: 9
-    restCentre: {x: 0.6948365, y: 1.7121797, z: -0.5052776}
-    restRadius: 0.10736405
-    restSpread: 0.11505872
-    centreOffset: {x: 0.058698058, y: 0.03298092, z: -0.014158577}
-    members: ff0a0000090b0000130b0000250b00003b0b00003e0b0000410b0000440b0000
-  - islandId: 9
-    restCentre: {x: 0.81709164, y: 1.6621698, z: -0.2348104}
-    restRadius: 0.11138164
-    restSpread: 0.115045495
-    centreOffset: {x: 0.05328095, y: 0.027317882, z: -0.008656248}
-    members: 0a0b0000180b0000470b00004a0b00004e0b00005a0b0000980c00009b0c0000
-  - islandId: 9
-    restCentre: {x: 0.5129576, y: 1.4303768, z: 0.6601914}
-    restRadius: 0.14962524
-    restSpread: 0.14001617
-    centreOffset: {x: 0.023554742, y: 0.0078315735, z: 0.07527983}
-    members: 640b00006b0b0000730b00007a0b0000670c00006c0c0000710c0000770c0000
-  - islandId: 9
-    restCentre: {x: -0.06498342, y: 1.419989, z: 0.7080712}
-    restRadius: 0.19567141
-    restSpread: 0.2343873
-    centreOffset: {x: -0.018257841, y: 0.10629952, z: 0.051858604}
-    members: 760b00007c0b0000820b0000860b00008a0b00008d0b0000960b0000510c0000
-  - islandId: 9
-    restCentre: {x: -0.78531176, y: 1.4837176, z: -0.26423603}
-    restRadius: 0.15554148
-    restSpread: 0.16698374
-    centreOffset: {x: -0.08161032, y: 0.011190414, z: -0.014702275}
-    members: ac0b0000b30b0000bb0b0000c20b00000f0c0000180c00001d0c0000230c0000
-  - islandId: 9
-    restCentre: {x: -0.02208089, y: 1.7210147, z: -0.8535188}
-    restRadius: 0.116059914
-    restSpread: 0.11693725
-    centreOffset: {x: 0.0063612983, y: 0.024445295, z: -0.05437064}
-    members: f50a0000020b0000220b0000d70b0000dc0b0000e30b0000eb0b0000f80b0000
-  - islandId: 9
-    restCentre: {x: -0.5126838, y: 1.6398606, z: -0.72418046}
-    restRadius: 0.16209228
-    restSpread: 0.17489569
-    centreOffset: {x: -0.09582245, y: 0.028349876, z: -0.046826303}
-    members: be0b0000c90b0000d10b0000e20b0000f10b0000fb0b0000060c00000c0c0000
-  - islandId: 9
-    restCentre: {x: -0.7195536, y: 1.367958, z: 0.3617816}
-    restRadius: 0.18782566
-    restSpread: 0.15462938
-    centreOffset: {x: -0.08546245, y: 0.0070079565, z: 0.034175843}
-    members: 8e0b00009b0b0000a40b0000ae0b0000290c0000310c0000390c0000410c0000
-  - islandId: 9
-    restCentre: {x: -0.04723891, y: 1.2789422, z: 0.6552721}
-    restRadius: 0.20145133
-    restSpread: 0.23560527
-    centreOffset: {x: 0.07929204, y: -0.11212242, z: -0.006498933}
-    members: 450c00004d0c0000500c0000540c0000570c00005b0c00005e0c0000630c0000
-  - islandId: 9
-    restCentre: {x: 0.8306637, y: 1.565672, z: 0.23892246}
-    restRadius: 0.1684001
-    restSpread: 0.19584641
-    centreOffset: {x: 0.101600945, y: 0.046034336, z: 0.043806687}
-    members: 190b0000560b00005e0b0000660b00007c0c0000820c0000890c00008f0c0000
-  - islandId: 10
-    restCentre: {x: -1.1432582, y: 1.7970824, z: 0.09634543}
-    restRadius: 0.110452674
-    restSpread: 0.10765159
-    centreOffset: {x: -0.014048576, y: 0.063734174, z: -0.0057263896}
-    members: a10c0000a70c0000ae0c0000b70c0000c50c0000b70d0000c90d0000d20d0000
-  - islandId: 10
-    restCentre: {x: -1.5269498, y: 1.7050711, z: 0.03145967}
-    restRadius: 0.0668261
-    restSpread: 0.07741228
-    centreOffset: {x: -0.018204093, y: 0.04334712, z: -0.011272248}
-    members: c40c0000cf0c0000db0c0000ee0c0000930d00009c0d0000a60d0000b30d0000
-  - islandId: 10
-    restCentre: {x: -1.6459885, y: 1.6202527, z: 0.023295265}
-    restRadius: 0.07572507
-    restSpread: 0.07793149
-    centreOffset: {x: -0.03776145, y: 0.03942418, z: -0.0019134842}
-    members: d50c0000e00c0000f10c0000010d00006f0d0000850d00008c0d0000950d0000
-  - islandId: 10
-    restCentre: {x: -1.6454183, y: 1.1140941, z: 0.09748842}
-    restRadius: 0.086259834
-    restSpread: 0.09033961
-    centreOffset: {x: -0.046067238, y: -0.0058807135, z: -0.0043844953}
-    members: 110d00001d0d0000250d00002d0d0000350d00003d0d0000450d00004d0d0000
-  - islandId: 10
-    restCentre: {x: -1.6892552, y: 1.2944391, z: 0.060878713}
-    restRadius: 0.07247557
-    restSpread: 0.07837962
-    centreOffset: {x: -0.04769838, y: -0.008010626, z: 0.0040253885}
-    members: ff0c00000b0d00001b0d00002a0d0000380d0000480d0000540d0000590d0000
-  - islandId: 10
-    restCentre: {x: -1.7031949, y: 1.4662979, z: 0.034163352}
-    restRadius: 0.08155487
-    restSpread: 0.07891026
-    centreOffset: {x: -0.043931723, y: 0.022033453, z: 0.00432582}
-    members: e70c0000f80c0000090d0000190d0000620d0000690d0000730d00007c0d0000
-  - islandId: 10
-    restCentre: {x: -1.3791598, y: 1.7502906, z: 0.052453514}
-    restRadius: 0.07533895
-    restSpread: 0.07862284
-    centreOffset: {x: -0.02181685, y: 0.038551927, z: -0.0067193024}
-    members: af0c0000bb0c0000c90c0000d30c0000a20d0000af0d0000ba0d0000c70d0000
-  - islandId: 11
-    restCentre: {x: -0.52294713, y: 0.60748345, z: 0.19399668}
-    restRadius: 0.083885424
-    restSpread: 0.08937562
-    centreOffset: {x: -0.022777498, y: 0.0148515105, z: 0.055953994}
-    members: d90d0000e20d0000ec0d0000f70d00000a0e0000570e0000610e00006b0e0000
-  - islandId: 11
-    restCentre: {x: -0.52918196, y: 0.4125243, z: 0.20378497}
-    restRadius: 0.07591647
-    restSpread: 0.07575086
-    centreOffset: {x: -0.016274035, y: -0.011339277, z: 0.038501948}
-    members: f40d0000060e0000100e00001d0e00002a0e0000360e0000430e0000490e0000
-  - islandId: 11
-    restCentre: {x: -0.507898, y: 0.29050475, z: 0.16632989}
-    restRadius: 0.05632909
-    restSpread: 0.061721217
-    centreOffset: {x: -0.015633762, y: -0.012654543, z: 0.02666156}
-    members: 0d0e0000130e0000190e00001f0e0000270e00002f0e0000330e00003e0e0000
-  - islandId: 12
-    restCentre: {x: 0.5728401, y: 0.62311506, z: 0.122545615}
-    restRadius: 0.084990464
-    restSpread: 0.092356734
-    centreOffset: {x: 0.028959453, y: 0.0049070716, z: 0.056704834}
-    members: 750e00007e0e0000880e0000930e0000a60e0000f30e0000fd0e0000070f0000
-  - islandId: 12
-    restCentre: {x: 0.5750393, y: 0.42271104, z: 0.12573197}
-    restRadius: 0.076012015
-    restSpread: 0.07756354
-    centreOffset: {x: 0.019392908, y: -0.008794516, z: 0.038654312}
-    members: 900e0000a20e0000ac0e0000b90e0000c60e0000d20e0000df0e0000e50e0000
-  - islandId: 12
-    restCentre: {x: 0.5666165, y: 0.29600614, z: 0.0983497}
-    restRadius: 0.05614382
-    restSpread: 0.061576586
-    centreOffset: {x: 0.0108307, y: -0.007553041, z: 0.03062892}
-    members: a90e0000af0e0000b50e0000bb0e0000c30e0000cb0e0000cf0e0000da0e0000
-  - islandId: 13
-    restCentre: {x: -0.46478724, y: 0.22871523, z: 0.04098957}
-    restRadius: 0.083994366
-    restSpread: 0.07914994
-    centreOffset: {x: 0.014671981, y: -0.046745196, z: -0.006467115}
-    members: 110f0000260f00003c0f0000510f0000660f0000c30f0000d80f0000ef0f0000
-  - islandId: 13
-    restCentre: {x: -0.54669553, y: 0.2506838, z: 0.24215983}
-    restRadius: 0.08177144
-    restSpread: 0.08464908
-    centreOffset: {x: 0.0014275908, y: -0.034792155, z: 0.019990653}
-    members: 360f0000810f0000950f0000a80f0000fd0f0000101000002410000037100000
-  - islandId: 14
-    restCentre: {x: -0.43649784, y: 0.7033994, z: -0.14144062}
-    restRadius: 0.09725484
-    restSpread: 0.11380944
-    centreOffset: {x: -0.008032799, y: -0.008571625, z: -0.06379453}
-    members: 5610000062100000761000008910000095100000091100001511000025110000
-  - islandId: 14
-    restCentre: {x: -0.24579085, y: 0.6399097, z: 0.1979947}
-    restRadius: 0.104166165
-    restSpread: 0.11704763
-    centreOffset: {x: 0.062132522, y: -0.012088895, z: 0.020366639}
-    members: 611000007b100000a0100000ac100000b7100000c4100000841100008f110000
-  - islandId: 14
-    restCentre: {x: -0.58319914, y: 0.7503537, z: 0.3479332}
-    restRadius: 0.10523741
-    restSpread: 0.13839976
-    centreOffset: {x: -0.028898, y: -0.0061528683, z: 0.06683186}
-    members: c0100000cf100000d9100000e3100000551100005e1100006811000072110000
-  - islandId: 14
-    restCentre: {x: -0.7156944, y: 0.79176414, z: 0.01986055}
-    restRadius: 0.093933046
-    restSpread: 0.09382561
-    centreOffset: {x: -0.048271716, y: 0.0054597855, z: -0.0149232}
-    members: e4100000f1100000fa1000000411000028110000391100004111000049110000
-  - islandId: 15
-    restCentre: {x: 1.167923, y: 1.7970824, z: 0.1328987}
-    restRadius: 0.11045263
-    restSpread: 0.10765159
-    centreOffset: {x: 0.014048576, y: 0.063734174, z: 0.0057263225}
-    members: 9b110000a1110000a8110000b1110000bf110000b1120000c3120000cc120000
-  - islandId: 15
-    restCentre: {x: 1.5516146, y: 1.7050711, z: 0.19778454}
-    restRadius: 0.06682608
-    restSpread: 0.07741231
-    centreOffset: {x: 0.018203974, y: 0.04334712, z: 0.011272237}
-    members: be110000c9110000d5110000e81100008d12000096120000a0120000ad120000
-  - islandId: 15
-    restCentre: {x: 1.6706533, y: 1.6202527, z: 0.205949}
-    restRadius: 0.07572513
-    restSpread: 0.07793153
-    centreOffset: {x: 0.03776145, y: 0.03942418, z: 0.0019135028}
-    members: cf110000da110000eb110000fb110000691200007f120000861200008f120000
-  - islandId: 15
-    restCentre: {x: 1.6700833, y: 1.1140944, z: 0.13175555}
-    restRadius: 0.08625988
-    restSpread: 0.09033954
-    centreOffset: {x: 0.046067238, y: -0.005880475, z: 0.0043842345}
-    members: 0b120000171200001f120000271200002f120000371200003f12000047120000
-  - islandId: 15
-    restCentre: {x: 1.7139202, y: 1.2944391, z: 0.16836545}
-    restRadius: 0.07247552
-    restSpread: 0.07837962
-    centreOffset: {x: 0.04769838, y: -0.008010626, z: -0.0040254593}
-    members: f911000005120000151200002412000032120000421200004e12000053120000
-  - islandId: 15
-    restCentre: {x: 1.7278599, y: 1.4662977, z: 0.1950808}
-    restRadius: 0.08155467
-    restSpread: 0.07891024
-    centreOffset: {x: 0.043931723, y: 0.022033334, z: -0.0043258965}
-    members: e1110000f211000003120000131200005c120000631200006d12000076120000
-  - islandId: 15
-    restCentre: {x: 1.4038246, y: 1.7502906, z: 0.17679071}
-    restRadius: 0.07533893
-    restSpread: 0.07862279
-    centreOffset: {x: 0.02181685, y: 0.038551927, z: 0.006719306}
-    members: a9110000b5110000c3110000cd1100009c120000a9120000b4120000c1120000
-  - islandId: 16
-    restCentre: {x: 0.07317745, y: 2.6999977, z: -0.20665076}
-    restRadius: 0.13515124
-    restSpread: 0.14875996
-    centreOffset: {x: -0.012652777, y: 0.014487505, z: -0.08250193}
-    members: d3120000df120000f312000006130000121300008613000092130000a2130000
-  - islandId: 16
-    restCentre: {x: 0.30374363, y: 2.6694782, z: 0.15367499}
-    restRadius: 0.1431823
-    restSpread: 0.14234476
-    centreOffset: {x: 0.07278237, y: 0.0327878, z: 0.022805542}
-    members: de120000f81200001d130000291300003413000041130000011400000c140000
-  - islandId: 16
-    restCentre: {x: -0.041440327, y: 2.6530054, z: 0.35937944}
-    restRadius: 0.13838223
-    restSpread: 0.15937564
-    centreOffset: {x: -0.022153819, y: -0.0034139156, z: 0.079012334}
-    members: 3d1300004c1300005613000060130000d2130000db130000e5130000ef130000
-  - islandId: 16
-    restCentre: {x: -0.26751775, y: 2.6888921, z: 0.072979465}
-    restRadius: 0.13227428
-    restSpread: 0.12689662
-    centreOffset: {x: -0.065910876, y: 0.007246256, z: -0.004647419}
-    members: 611300006e1300007713000081130000a5130000b6130000be130000c6130000
-  - islandId: 17
-    restCentre: {x: 0.5550939, y: 0.31298718, z: 0.16434425}
-    restRadius: 0.08415073
-    restSpread: 0.10191091
-    centreOffset: {x: -0.019009054, y: 0.040094316, z: 0.019564956}
-    members: 18140000781400008d140000a2140000b914000020150000351500004a150000
-  - islandId: 17
-    restCentre: {x: 0.5551665, y: 0.24372944, z: -0.05702953}
-    restRadius: 0.08034853
-    restSpread: 0.09172249
-    centreOffset: {x: 0.029151917, y: -0.012316436, z: -0.034133203}
-    members: 1c140000301400004a1400005f140000bf140000d3140000e8140000fc140000
-  - islandId: 18
-    restCentre: {x: 0.56855917, y: 0.73942167, z: -0.20969735}
-    restRadius: 0.10988936
-    restSpread: 0.13479725
-    centreOffset: {x: 0.010029495, y: -0.0269593, z: -0.053779364}
-    members: 611500006f1500008115000092150000a1150000b01500001b1600002d160000
-  - islandId: 18
-    restCentre: {x: 0.68328214, y: 0.7646918, z: 0.15723613}
-    restRadius: 0.10603381
-    restSpread: 0.10156336
-    centreOffset: {x: 0.037484527, y: -0.008785009, z: 0.034630775}
-    members: 77150000b8150000c3150000cf150000df150000811600008d16000098160000
-  - islandId: 18
-    restCentre: {x: 0.34842747, y: 0.62360907, z: 0.1072006}
-    restRadius: 0.107624516
-    restSpread: 0.15061635
-    centreOffset: {x: -0.041740924, y: -0.070462346, z: 0.039884925}
-    members: d7150000eb150000fa15000008160000381600004d1600005b1600006a160000
-  - islandId: 19
-    restCentre: {x: -1.0123225, y: 1.6156962, z: 0.16378139}
-    restRadius: 0.09332436
-    restSpread: 0.10755494
-    centreOffset: {x: 0.012857556, y: -0.044297934, z: 0.004772812}
-    members: a6160000b4160000c6160000d7160000e6160000f51600006017000072170000
-  - islandId: 19
-    restCentre: {x: -1.0720061, y: 1.9196472, z: 0.21010311}
-    restRadius: 0.09094368
-    restSpread: 0.11315785
-    centreOffset: {x: 0.0042711496, y: 0.047636747, z: 0.012661517}
-    members: bc160000ff1600000c170000191700002b170000c2170000cf170000dc170000
-  - islandId: 19
-    restCentre: {x: -1.0193894, y: 1.8077167, z: -0.07451406}
-    restRadius: 0.09276321
-    restSpread: 0.10336049
-    centreOffset: {x: 0.010178208, y: -0.0053128004, z: -0.036634643}
-    members: 2217000035170000421700004f1700007d170000901700009d170000aa170000
-  - islandId: 20
-    restCentre: {x: 1.0326066, y: 1.5705214, z: 0.1688563}
-    restRadius: 0.095637724
-    restSpread: 0.11542447
-    centreOffset: {x: -0.001560092, y: -0.050628424, z: -0.0017452985}
-    members: eb170000f91700000b1800001c1800002b1800003a180000a5180000b7180000
-  - islandId: 20
-    restCentre: {x: 1.109746, y: 1.8879833, z: 0.2737789}
-    restRadius: 0.10057279
-    restSpread: 0.13350978
-    centreOffset: {x: 0.039259434, y: 0.03700006, z: 0.0768868}
-    members: 011800004518000054180000621800007618000002190000101900001f190000
-  - islandId: 20
-    restCentre: {x: 1.0979023, y: 1.8172741, z: -0.08260414}
-    restRadius: 0.09453885
-    restSpread: 0.107334666
-    centreOffset: {x: 0.027693272, y: -0.002716422, z: -0.049046516}
-    members: 6d1800007e1800008918000095180000be180000d2180000de180000e9180000
-  - islandId: 21
-    restCentre: {x: -1.5536816, y: 1.05906, z: 0.1564746}
-    restRadius: 0.09358281
-    restSpread: 0.10667537
-    centreOffset: {x: 0.034356594, y: 0.022668958, z: 0.048129648}
-    members: 3019000040190000521900006519000076190000dc190000ef190000021a0000
-  - islandId: 21
-    restCentre: {x: -1.5412709, y: 0.9241262, z: 0.1502231}
-    restRadius: 0.078634635
-    restSpread: 0.08789111
-    centreOffset: {x: -0.03746617, y: 0.024095178, z: 0.009043559}
-    members: 4d19000089190000911900009c190000a9190000591a0000631a00006b1a0000
-  - islandId: 21
-    restCentre: {x: -1.6041635, y: 0.8608899, z: 0.18400791}
-    restRadius: 0.07587549
-    restSpread: 0.09567522
-    centreOffset: {x: 0.038365006, y: 0.01676321, z: 0.041184798}
-    members: 95190000b2190000c2190000d2190000161a0000251a0000351a0000451a0000
-  - islandId: 22
-    restCentre: {x: 1.6355518, y: 1.0607368, z: 0.15110712}
-    restRadius: 0.10067986
-    restSpread: 0.10241811
-    centreOffset: {x: 0.026714802, y: 0.033925295, z: 0.028888285}
-    members: 751a0000861a0000981a0000ab1a0000bd1a00001c1b0000331b00004b1b0000
-  - islandId: 22
-    restCentre: {x: 1.5477993, y: 0.7873512, z: 0.17129086}
-    restRadius: 0.0985596
-    restSpread: 0.102515265
-    centreOffset: {x: -0.032766223, y: -0.034962535, z: 0.023768395}
-    members: 921a0000d61a0000e21a0000ee1a0000831b00008f1b00009b1b0000a71b0000
-  - islandId: 22
-    restCentre: {x: 1.4908452, y: 0.93516564, z: 0.18374097}
-    restRadius: 0.09600925
-    restSpread: 0.09949923
-    centreOffset: {x: 0.004916668, y: -0.00777632, z: 0.058797643}
-    members: f61a0000041b00000f1b00001a1b0000431b00005f1b00006a1b0000751b0000
-  - islandId: 23
-    restCentre: {x: 0.38148984, y: 2.2024057, z: 0.54955554}
-    restRadius: 0.06019807
-    restSpread: 0.06530319
-    centreOffset: {x: 0.0011303127, y: -0.01208663, z: -0.020582795}
-    members: ba1b0000d51b0000f11b00000c1c0000281c0000441c00005f1c00007b1c0000
-  - islandId: 24
-    restCentre: {x: -0.32203415, y: 2.2117386, z: 0.5944586}
-    restRadius: 0.051900454
-    restSpread: 0.054637946
-    centreOffset: {x: -0.028088272, y: -0.009514332, z: -0.016565561}
-    members: 9b1c0000ac1c0000c71c0000d81c0000161d0000261d0000341d0000451d0000
-  - islandId: 24
-    restCentre: {x: -0.1917068, y: 2.2315054, z: 0.63712645}
-    restRadius: 0.05440498
-    restSpread: 0.07340974
-    centreOffset: {x: 0.0064878464, y: -0.0388062, z: 0.0050793886}
-    members: 971c0000ba1c0000e61c0000f31c0000011d0000131d00005d1d00006a1d0000
-  - islandId: 25
-    restCentre: {x: 0.54099584, y: 0.12196971, z: 0.34644994}
-    restRadius: 0.16550003
-    restSpread: 0.15349266
-    centreOffset: {x: 0.06468311, y: -0.005384557, z: -0.049098372}
-    members: 781d00007b1d00007f1d0000ae1d0000b01d0000251e00004f1e0000511e0000
-  - islandId: 25
-    restCentre: {x: 0.67497474, y: 0.10153292, z: 0.49679115}
-    restRadius: 0.15220664
-    restSpread: 0.13484761
-    centreOffset: {x: -0.036300838, y: 0.00549531, z: -0.075321585}
-    members: 801d0000841d0000881d0000a31d00002d1e0000311e0000351e00003c1e0000
-  - islandId: 25
-    restCentre: {x: 0.7012832, y: 0.17859751, z: 0.32215872}
-    restRadius: 0.1709722
-    restSpread: 0.16037391
-    centreOffset: {x: -0.053339243, y: -0.06272097, z: 0.0051476657}
-    members: 8f1d00009b1d00009c1d00009d1d00009e1d0000a11d0000a21d0000a61d0000
-  - islandId: 25
-    restCentre: {x: 0.44101202, y: 0.10886763, z: 0.031180067}
-    restRadius: 0.15114063
-    restSpread: 0.15644655
-    centreOffset: {x: 0.07167378, y: 0.011392251, z: -0.024540884}
-    members: 7a1d00007e1d0000851d0000a91d00001b1e00001e1e0000211e00004c1e0000
-  - islandId: 25
-    restCentre: {x: 0.5873104, y: 0.11111667, z: -0.029894732}
-    restRadius: 0.17074071
-    restSpread: 0.16626126
-    centreOffset: {x: -0.029161453, y: 0.019850574, z: 0.094259284}
-    members: 891d00008e1d0000961d00009a1d0000231e00002a1e0000321e0000461e0000
-  - islandId: 25
-    restCentre: {x: 0.72091067, y: 0.101670176, z: 0.2572925}
-    restRadius: 0.15139571
-    restSpread: 0.16781554
-    centreOffset: {x: -0.09117383, y: 0.029120736, z: -0.020611674}
-    members: 8c1d0000931d0000971d0000361e0000381e00003a1e00003e1e0000411e0000
-  - islandId: 26
-    restCentre: {x: -0.43617803, y: 0.12196971, z: 0.33940408}
-    restRadius: 0.16550003
-    restSpread: 0.15472537
-    centreOffset: {x: -0.076052725, y: 0.0009853393, z: -0.04874134}
-    members: b11d0000b41d0000b81d0000e71d0000e91d00005e1e0000881e00008a1e0000
-  - islandId: 26
-    restCentre: {x: -0.5513567, y: 0.10153292, z: 0.50459087}
-    restRadius: 0.15220673
-    restSpread: 0.13484764
-    centreOffset: {x: 0.027099848, y: 0.00549531, z: -0.0790993}
-    members: b91d0000bd1d0000c11d0000dc1d0000661e00006a1e00006e1e0000751e0000
-  - islandId: 26
-    restCentre: {x: -0.5982158, y: 0.17859751, z: 0.3343181}
-    restRadius: 0.17097223
-    restSpread: 0.16037391
-    centreOffset: {x: 0.053573072, y: -0.06272097, z: -0.0012225807}
-    members: c81d0000d41d0000d51d0000d61d0000d71d0000da1d0000db1d0000df1d0000
-  - islandId: 26
-    restCentre: {x: -0.3743386, y: 0.10886763, z: 0.014492165}
-    restRadius: 0.15114072
-    restSpread: 0.15644655
-    centreOffset: {x: -0.074080825, y: 0.011392251, z: -0.015856287}
-    members: b21d0000b71d0000be1d0000e21d0000541e0000571e00005a1e0000851e0000
-  - islandId: 26
-    restCentre: {x: -0.52685404, y: 0.11111668, z: -0.028778255}
-    restRadius: 0.1707406
-    restSpread: 0.16626129
-    centreOffset: {x: 0.04014814, y: 0.019850582, z: 0.090129554}
-    members: c21d0000c71d0000cf1d0000d31d00005c1e0000631e00006b1e00007f1e0000
-  - islandId: 26
-    restCentre: {x: -0.625407, y: 0.101670176, z: 0.27224156}
-    restRadius: 0.15139565
-    restSpread: 0.1678155
-    centreOffset: {x: 0.08808118, y: 0.029120736, z: -0.03129229}
-    members: c51d0000cc1d0000d01d00006f1e0000711e0000731e0000771e00007a1e0000
-  bakedVertexCount: 7821
+  bindings: []
+  bakedVertexCount: 0
+--- !u!64 &531405058
+MeshCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 531405047}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 5
+  m_Convex: 0
+  m_CookingOptions: 30
+  m_Mesh: {fileID: 6508219602669676737, guid: 0e67731e978adb84e84ac6be435bf988, type: 3}
+--- !u!1 &602025623
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 602025626}
+  - component: {fileID: 602025625}
+  - component: {fileID: 602025624}
+  m_Layer: 0
+  m_Name: Terrain
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 2147483647
+  m_IsActive: 1
+--- !u!154 &602025624
+TerrainCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 602025623}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 2
+  m_TerrainData: {fileID: 15600000, guid: 62d4b9e9a199aa6458ff9aeb8753a763, type: 2}
+  m_EnableTreeColliders: 1
+--- !u!218 &602025625
+Terrain:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 602025623}
+  m_Enabled: 1
+  serializedVersion: 6
+  m_TerrainData: {fileID: 15600000, guid: 62d4b9e9a199aa6458ff9aeb8753a763, type: 2}
+  m_TreeDistance: 5000
+  m_TreeBillboardDistance: 50
+  m_TreeCrossFadeLength: 5
+  m_TreeMaximumFullLODCount: 50
+  m_DetailObjectDistance: 80
+  m_DetailObjectDensity: 1
+  m_HeightmapPixelError: 5
+  m_SplatMapDistance: 1000
+  m_HeightmapMinimumLODSimplification: 0
+  m_HeightmapMaximumLOD: 0
+  m_ShadowCastingMode: 2
+  m_DrawHeightmap: 1
+  m_DrawInstanced: 0
+  m_DrawTreesAndFoliage: 1
+  m_StaticShadowCaster: 0
+  m_IgnoreQualitySettings: 0
+  m_ReflectionProbeUsage: 1
+  m_MaterialTemplate: {fileID: 2100000, guid: 594ea882c5a793440b60ff72d896021e, type: 2}
+  m_BakeLightProbesForTrees: 1
+  m_PreserveTreePrototypeLayers: 0
+  m_DeringLightProbesForTrees: 1
+  m_ReceiveGI: 1
+  m_ScaleInLightmap: 0.0256
+  m_LightmapParameters: {fileID: 15203, guid: 0000000000000000f000000000000000, type: 0}
+  m_GroupingID: 0
+  m_RenderingLayerMask: 1
+  m_AllowAutoConnect: 1
+  m_EnableHeightmapRayTracing: 1
+  m_EnableTreesAndDetailsRayTracing: 0
+  m_TreeMotionVectorModeOverride: 3
+--- !u!4 &602025626
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 602025623}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 20, y: 0, z: -20}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &759678223
 GameObject:
   m_ObjectHideFlags: 0
@@ -2890,7 +2329,6 @@ GameObject:
   m_Component:
   - component: {fileID: 1310362874}
   - component: {fileID: 1310362873}
-  - component: {fileID: 1310362875}
   m_Layer: 0
   m_Name: DentManager
   m_TagString: Untagged
@@ -2938,21 +2376,6 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
---- !u!114 &1310362875
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1310362872}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: a6239da4d56a7f74e80c3527aa27800f, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: Assembly-CSharp::DentDebugView
-  dentManager: {fileID: 1310362873}
-  displaySize: 256
-  showInfo: 1
 --- !u!1 &1455394640 stripped
 GameObject:
   m_CorrespondingSourceObject: {fileID: 919132149155446097, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
@@ -3047,6 +2470,9 @@ MonoBehaviour:
   dentManager: {fileID: 1310362873}
   displaySize: 256
   showInfo: 1
+  channel: 0
+  keyboardShortcuts: 1
+  showAbsolute: 1
 --- !u!114 &1743114743
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3620,9 +3046,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: a6239da4d56a7f74e80c3527aa27800f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DentDebugView
-  dentManager: {fileID: 1310362873}
+  dentManager: {fileID: 2116916760}
   displaySize: 256
   showInfo: 1
+  channel: 0
+  keyboardShortcuts: 1
+  showAbsolute: 1
 --- !u!114 &2116916760
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -3803,3 +3232,4 @@ SceneRoots:
   - {fileID: 370753250}
   - {fileID: 2116916762}
   - {fileID: 380082809}
+  - {fileID: 602025626}

@@ -42,6 +42,18 @@ public class DentContactSource : MonoBehaviour
              "features and thin edges; each one is a raycast.")]
     [Range(6, 64)] public int sampleDirections = 24;
 
+    [Header("Curvature")]
+    [Tooltip("How far apart the samples are when estimating a convex mesh's curvature, as a " +
+             "fraction of the visual radius.\n\n" +
+             "A convex hull is faceted, so samples closer together than a facet report it as " +
+             "flat and samples across an edge report a spike. Spreading them over several " +
+             "facets averages that out.")]
+    [Range(0.05f, 1f)] public float curvatureSampleSpread = 0.3f;
+
+    [Tooltip("Largest surface radius considered. Anything flatter than this is treated as " +
+             "this radius, which reads as flat.")]
+    public float maxSurfaceRadius = 50f;
+
     [Header("Clustering")]
     [Tooltip("Surfaces whose normals are closer together than this angle are treated as one " +
              "and the deepest wins. Lower values keep the faces of an edge separate so the " +
@@ -138,8 +150,13 @@ public class DentContactSource : MonoBehaviour
         public Vector3 pressAxis;  // from the surface INTO the character
         public Vector3 right;      // in-plane basis the extents are measured along
         public float sink;         // how far the visible mesh overlaps the surface
-        public float radius;       // Capsule only: radius of the surface it sits on
-        public float bulgeRadius;  // Capsule only: radius of the contact patch
+        public float radius;       // curved surfaces: radius of the surface it sits on
+        public float bulgeRadius;  // curved surfaces: radius of the contact patch
+        public float curvature;    // 1/R, 0 for a flat face
+
+        // Running curvature estimate, gathered as samples of the same surface merge in.
+        public float curvatureSum;
+        public int curvatureSamples;
 
         // Signed extents relative to 'point'. Plane only - a curved surface tapers off on
         // its own, so it needs no rectangle and no edge probing.
@@ -164,6 +181,7 @@ public class DentContactSource : MonoBehaviour
         public float sink;
         public float radius;
         public float bulgeRadius;
+        public float curvature;
         public float weight;       // 0..1, fades in and out
 
         // Signed extents in the plane's own basis, measured from the contact point.
@@ -242,13 +260,47 @@ public class DentContactSource : MonoBehaviour
             if (col is BoxCollider box) ProbeBox(box, centre, mergeDot);
             else if (col is SphereCollider sphere) ProbeSphere(sphere, centre, mergeDot);
             else if (col is CapsuleCollider capsule) ProbeCapsule(capsule, centre, mergeDot);
+            else if (col is MeshCollider mesh && mesh.convex) ProbeConvexMesh(mesh, centre, mergeDot);
             else needsRaycastPass = true;
         }
 
         // Rays are only needed for geometry that cannot be solved directly.
         if (needsRaycastPass) ProbeByRays(centre, mergeDot);
 
+        FinaliseSampledCurvature();
+
         contacts.Sort((a, b) => b.sink.CompareTo(a.sink));
+    }
+
+    /// <summary>
+    /// Turns the curvature gathered while merging ray samples into a usable radius.
+    ///
+    /// Nothing analytic is possible on a concave mesh, but the rays that found the surface
+    /// already sampled it in several places - and those samples were being thrown away when
+    /// they merged. How fast the normal turns between two of them, over the distance between
+    /// them, is the curvature. Free, since the rays were cast anyway.
+    ///
+    /// Only applied to sampled contacts: a box face is exactly flat and should stay that way.
+    /// </summary>
+    void FinaliseSampledCurvature()
+    {
+        float minCurvature = 1f / Mathf.Max(maxSurfaceRadius, 0.01f);
+
+        for (int i = 0; i < contacts.Count; i++)
+        {
+            Contact c = contacts[i];
+
+            if (c.hasExtents || c.shape != DentShape.Plane) continue;
+            if (c.curvatureSamples == 0) continue;
+
+            float curvature = c.curvatureSum / c.curvatureSamples;
+
+            // Anything flatter than the cap reads as flat, which also filters out the noise
+            // a handful of ray samples inevitably carries.
+            c.curvature = Mathf.Abs(curvature) > minCurvature ? curvature : 0f;
+
+            contacts[i] = c;
+        }
     }
 
     /// <summary>
@@ -428,6 +480,9 @@ public class DentContactSource : MonoBehaviour
 
         MergeOrAdd(new Contact
         {
+            // Capsule is a punch: its bulge piles up around the contact, which reads well
+            // for something pressing into clay. The geometry would suit a curved Plane
+            // equally, but that carries resting semantics and a softer, flatter look.
             shape = DentShape.Capsule,
             point = surfaceCentre + normal * radius,
             pressAxis = normal,
@@ -454,6 +509,76 @@ public class DentContactSource : MonoBehaviour
         return a + ab * t;
     }
 
+    /// <summary>
+    /// Convex mesh, reduced to the sphere that best matches it at the contact.
+    ///
+    /// Collider.ClosestPoint gives the contact point and normal directly - no rays, and it
+    /// handles arbitrary convex shapes. What it does not give is how sharply the surface
+    /// curves, so that is measured: query a few points offset sideways and see how fast the
+    /// normal rotates against how far the contact moved. That ratio is the curvature, and
+    /// its reciprocal is the radius the existing curved-contact path already expects.
+    ///
+    /// Only works on CONVEX meshes. ClosestPoint returns the input position unchanged for a
+    /// concave one, which is why those still fall back to ray sampling.
+    /// </summary>
+    void ProbeConvexMesh(Collider col, Vector3 centre, float mergeDot)
+    {
+        Vector3 p0 = col.ClosestPoint(centre);
+
+        Vector3 delta = centre - p0;
+        float distance = delta.magnitude;
+
+        // Zero means the centre is inside the collider, or ClosestPoint is unsupported here.
+        if (distance < 1e-4f) return;
+        if (distance > visualRadius) return;
+
+        Vector3 normal = delta / distance;
+
+        Quaternion basis = LookAlong(normal);
+        Vector3 tangentA = basis * Vector3.right;
+        Vector3 tangentB = basis * Vector3.up;
+
+        float spread = visualRadius * curvatureSampleSpread;
+
+        float total = 0f;
+        int samples = 0;
+
+        AccumulateCurvature(col, p0, normal, centre + tangentA * spread, ref total, ref samples);
+        AccumulateCurvature(col, p0, normal, centre - tangentA * spread, ref total, ref samples);
+        AccumulateCurvature(col, p0, normal, centre + tangentB * spread, ref total, ref samples);
+        AccumulateCurvature(col, p0, normal, centre - tangentB * spread, ref total, ref samples);
+
+        float curvature = samples > 0 ? total / samples : 0f;
+        float radius = curvature > 1f / maxSurfaceRadius
+            ? 1f / curvature
+            : maxSurfaceRadius;
+
+        // The sphere that touches at p0 with this normal has its centre one radius back.
+        AddCurvedContact(p0 - normal * radius, radius, centre, mergeDot);
+    }
+
+    /// <summary>
+    /// Curvature between the contact and one offset sample: how much the normal turned,
+    /// divided by how far along the surface it turned over.
+    /// </summary>
+    static void AccumulateCurvature(Collider col, Vector3 p0, Vector3 n0, Vector3 queryPoint,
+                                    ref float total, ref int samples)
+    {
+        Vector3 p1 = col.ClosestPoint(queryPoint);
+
+        Vector3 delta = queryPoint - p1;
+        float distance = delta.magnitude;
+        if (distance < 1e-4f) return;
+
+        float arc = Vector3.Distance(p1, p0);
+        if (arc < 1e-4f) return;
+
+        float angle = Vector3.Angle(n0, delta / distance) * Mathf.Deg2Rad;
+
+        total += angle / arc;
+        samples++;
+    }
+
     void ProbeByRays(Vector3 centre, float mergeDot)
     {
         for (int i = 0; i < directions.Length; i++)
@@ -462,9 +587,10 @@ public class DentContactSource : MonoBehaviour
                                  surfaceMask, QueryTriggerInteraction.Ignore))
                 continue;
 
-            // Boxes and rounded primitives were already handled exactly.
+            // Boxes, rounded primitives and convex meshes were already handled directly.
             if (hit.collider is BoxCollider || hit.collider is SphereCollider
                 || hit.collider is CapsuleCollider) continue;
+            if (hit.collider is MeshCollider hitMesh && hitMesh.convex) continue;
 
             float sink = visualRadius - hit.distance;
             if (sink < minSink) continue;
@@ -486,9 +612,39 @@ public class DentContactSource : MonoBehaviour
     {
         for (int i = 0; i < contacts.Count; i++)
         {
-            if (Vector3.Dot(contacts[i].pressAxis, c.pressAxis) < mergeDot) continue;
+            Contact existing = contacts[i];
+            if (Vector3.Dot(existing.pressAxis, c.pressAxis) < mergeDot) continue;
 
-            if (c.sink > contacts[i].sink) contacts[i] = c;
+            // Two samples of the same surface. How far the normal turned between them,
+            // over how far apart they are, is the curvature - so merging is where the
+            // shape of a curved surface can be read off for free.
+            float arc = Vector3.Distance(existing.point, c.point);
+            if (arc > 1e-4f)
+            {
+                float angle = Vector3.Angle(existing.pressAxis, c.pressAxis) * Mathf.Deg2Rad;
+
+                // Behind the tangent plane means the surface is curving away: convex,
+                // which is the positive direction for the stamp.
+                float axial = Vector3.Dot(c.point - existing.point, existing.pressAxis);
+                float sign = axial <= 0f ? 1f : -1f;
+
+                existing.curvatureSum += sign * angle / arc;
+                existing.curvatureSamples++;
+            }
+
+            if (c.sink > existing.sink)
+            {
+                // Deeper sample wins the geometry, but the estimate built up so far has to
+                // survive the swap.
+                float sum = existing.curvatureSum;
+                int samples = existing.curvatureSamples;
+
+                existing = c;
+                existing.curvatureSum = sum;
+                existing.curvatureSamples = samples;
+            }
+
+            contacts[i] = existing;
             return;
         }
 
@@ -535,6 +691,7 @@ public class DentContactSource : MonoBehaviour
                     right = contact.right,
                     radius = contact.radius,
                     bulgeRadius = contact.bulgeRadius,
+                    curvature = contact.curvature,
                     sink = contact.sink,
                     weight = 0f
                 };
@@ -550,6 +707,7 @@ public class DentContactSource : MonoBehaviour
                 match.sink = Mathf.Lerp(match.sink, contact.sink, k);
                 match.radius = Mathf.Lerp(match.radius, contact.radius, k);
                 match.bulgeRadius = Mathf.Lerp(match.bulgeRadius, contact.bulgeRadius, k);
+                match.curvature = Mathf.Lerp(match.curvature, contact.curvature, k);
 
                 if (contact.hasExtents)
                     match.right = Vector3.Slerp(match.right, contact.right, k).normalized;
@@ -709,8 +867,8 @@ public class DentContactSource : MonoBehaviour
                 src.outerRadius = Mathf.Max(s.radius, 0.0001f);
                 src.bulgeRadius = s.bulgeRadius;
 
-                // A surface the character rests ON, so the displaced material has to splay
-                // outward. Punch semantics would push it along -Z, straight into the sphere.
+                // Still a surface being rested ON, so the bulge splays outward. Punch
+                // direction would push it along -Z, straight into the collider.
                 src.bulgeOutward = 1f;
 
                 ApplyCommonSettings(src, s.sink, s.weight);
@@ -745,7 +903,8 @@ public class DentContactSource : MonoBehaviour
 
             ApplySettings(src, s.sink, s.weight,
                           Mathf.Max((maxX - minX) * 0.5f, 0.0001f),
-                          Mathf.Max((maxY - minY) * 0.5f, 0.0001f));
+                          Mathf.Max((maxY - minY) * 0.5f, 0.0001f),
+                          s.curvature);
         }
     }
 
@@ -764,13 +923,15 @@ public class DentContactSource : MonoBehaviour
         }
     }
 
-    void ApplySettings(DentSource src, float sink, float weight, float halfX, float halfY)
+    void ApplySettings(DentSource src, float sink, float weight, float halfX, float halfY,
+                       float curvature)
     {
         src.shape = DentShape.Plane;
 
         src.innerRadius = halfX;
         src.outerRadius = halfY;
         src.planeEdgeSoftness = planeEdgeSoftness;
+        src.planeCurvature = curvature;
         src.bulgeRadius = 0f;   // planes size their splay from the surface itself
 
         ApplyCommonSettings(src, sink, weight);
@@ -820,7 +981,7 @@ public class DentContactSource : MonoBehaviour
             Gizmos.DrawSphere(s.point, 0.03f);
             Gizmos.DrawLine(s.point, s.point + s.pressAxis * 0.3f);
 
-            if (s.shape == DentShape.Capsule)
+            if (s.shape == DentShape.Capsule || s.curvature != 0f)
             {
                 // The surface this stamp is matching, drawn where it actually curves.
                 Gizmos.DrawWireSphere(s.point - s.pressAxis * s.radius, s.radius);

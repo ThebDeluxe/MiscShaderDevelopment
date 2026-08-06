@@ -101,6 +101,14 @@ public class DentSource : MonoBehaviour
              "0 = no clamp.")]
     public float bulgeClamp = 0.25f;
 
+    [Tooltip("Plane only. Curvature of the surface, as 1/radius.\n\n" +
+             "0 is perfectly flat. Positive curves AWAY from the mesh - resting on a ball " +
+             "or a pillar. Negative cradles it - the inside of a bowl or a pipe.\n\n" +
+             "This is a second-order fit about the contact, so it is accurate where the " +
+             "surfaces actually touch and drifts further out, which is exactly where the " +
+             "press has faded to nothing anyway.")]
+    public float planeCurvature = 0f;
+
     [Tooltip("Plane only. Offset of the rectangle's centre from this transform, along the " +
              "source's own +X and +Y.\n\n" +
              "Lets the source sit under the character - which is what the splay radiates " +

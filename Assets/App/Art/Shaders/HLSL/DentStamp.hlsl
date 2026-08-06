@@ -39,6 +39,8 @@
 //                    measured along the source's own +X and +Y. The source itself stays
 //                    under the character - it is what the splay radiates from and what
 //                    range checks measure - so the rectangle has to be placed separately.
+//                    w = curvature, 1/R. 0 is flat, positive curves away from the mesh
+//                    (convex, resting on a ball), negative cradles it (concave, a bowl).
 //                    For PUNCH shapes: y = radius the bulge ring sits at, 0 to use the
 //                    outer radius. A stamp matching a large curved surface has an outer
 //                    radius far bigger than the patch it actually touches, so the ring
@@ -223,18 +225,30 @@ float3 EvaluateDentWorld(float3 WorldPos, float3 WorldNormal, out float DecayMul
         {
             float3 planeUp = cross(axis, right);
 
+            // In-plane coordinates measured from the SOURCE, which sits at the point of
+            // tangency. Curvature has to be measured from there; the rectangle is a
+            // separate concern and gets its own offset.
+            float2 fromSource = float2(dot(toPoint, right), dot(toPoint, planeUp));
+
             // The rectangle is placed relative to the source rather than centred on it, so
             // the source can stay under the character while the surface is clamped to the
             // collider face that produced it.
             float2 planeOffset = float2(_DentDecay[i].y, _DentDecay[i].z);
 
-            float lx = abs(dot(toPoint, right) - planeOffset.x);
-            float ly = abs(dot(toPoint, planeUp) - planeOffset.y);
+            float lx = abs(fromSource.x - planeOffset.x);
+            float ly = abs(fromSource.y - planeOffset.y);
 
             float halfX = inner;   // no rim fillet on a plane, so this slot is the 2nd extent
             float halfY = outer;
 
-            surfaceAxial = (lx <= halfX && ly <= halfY) ? 0.0 : -1e9;
+            // Second-order surface: the Taylor expansion of any smooth shape about the
+            // contact. Zero curvature leaves it perfectly flat, so this generalises the
+            // flat plane rather than replacing it - and one parameter then covers a ball,
+            // a pillar or the inside of a bowl.
+            float curvature = _DentDecay[i].w;
+            float curved = -0.5 * curvature * dot(fromSource, fromSource);
+
+            surfaceAxial = (lx <= halfX && ly <= halfY) ? curved : -1e9;
 
             // Soften the last fraction of each edge, so the mesh bends over the lip instead
             // of shearing off along a hard line.

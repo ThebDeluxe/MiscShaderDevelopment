@@ -136,7 +136,6 @@ public class DentManager : MonoBehaviour
     bool initialised;
 
     public RenderTexture CurrentDentMap => aIsCurrent ? rtA : rtB;
-    public int TextureSize => generator != null ? generator.TextureSize : 0;
     public int ActiveDentCount => active.Count;
 
     public static void Register(DentSource s)
@@ -210,22 +209,20 @@ public class DentManager : MonoBehaviour
             return false;
         }
 
-        int size = generator.TextureSize;
-        rtA = CreateRT(size);
-        rtB = CreateRT(size);
+        rtA = CreateRT(generator.TextureWidth, generator.TextureHeight);
+        rtB = CreateRT(generator.TextureWidth, generator.TextureHeight);
         aIsCurrent = true;
-
         cmd = new CommandBuffer { name = $"Dent Stamp Pass ({targetRenderer.name})" };
 
         initialised = true;
         return true;
     }
 
-    RenderTexture CreateRT(int size)
+    RenderTexture CreateRT(int width, int height)
     {
-        var rt = new RenderTexture(size, size, 0, format, RenderTextureReadWrite.Linear)
+        var rt = new RenderTexture(width, height, 0, format, RenderTextureReadWrite.Linear)
         {
-            name = $"DentMap_{name}_{size}",
+            name = $"DentMap_{name}_{width}x{height}",
             wrapMode = TextureWrapMode.Clamp,
             // Point is required: neighbouring texels belong to unrelated vertices,
             // so any filtering would blend garbage between them.

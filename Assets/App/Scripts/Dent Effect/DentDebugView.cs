@@ -14,7 +14,11 @@ public class DentDebugView : MonoBehaviour
     public enum Channel { All = 0, Red = 1, Green = 2, Blue = 3, Alpha = 4 }
 
     public DentManager dentManager;
+
+    [Tooltip("Longest edge of the preview, in pixels. The other edge follows the texture's " +
+             "own aspect, which changes with vertex count.")]
     public int displaySize = 256;
+
     public bool showInfo = true;
 
     [Tooltip("Which channel is displayed. 1 = all, 2 = R, 3 = G, 4 = B, 5 = A.")]
@@ -54,7 +58,15 @@ public class DentDebugView : MonoBehaviour
         var map = dentManager.CurrentDentMap;
         if (map == null) return;
 
-        var rect = new Rect(10, 10, displaySize, displaySize);
+        // Fit the texture's own aspect inside a displaySize box. The map is sized to the
+        // vertex count, so it is rarely square and never a fixed shape - drawing it into a
+        // hardcoded square stretches it and makes the layout impossible to read.
+        float aspect = map.height > 0 ? map.width / (float)map.height : 1f;
+
+        float drawWidth = aspect >= 1f ? displaySize : displaySize * aspect;
+        float drawHeight = aspect >= 1f ? displaySize / aspect : displaySize;
+
+        var rect = new Rect(10, 10, drawWidth, drawHeight);
 
         // Graphics.DrawTexture is the only way to put a material behind an IMGUI blit, and
         // it is only valid during Repaint.
@@ -83,14 +95,15 @@ public class DentDebugView : MonoBehaviour
         string info =
             $"Dent map: {map.width}x{map.height} ({map.format})\n" +
             $"Channel: {ChannelLabel()}   [1-5]{(showAbsolute ? "  abs" : "")}\n" +
-            $"Verts: {(gen != null ? gen.VertexCount : 0)}\n" +
+            $"Verts: {(gen != null ? gen.VertexCount : 0)}" +
+            $"{(gen != null ? $"  ({gen.VertexCount / (float)(map.width * map.height):P0} of texels used)" : "")}\n" +
             $"UV channel: TEXCOORD{(gen != null ? gen.targetUVChannel : -1)}\n" +
             $"Active sources: {dentManager.ActiveDentCount}\n" +
             $"Flip Y: {(dentManager.overrideFlipY ? dentManager.flipYValue : SystemInfo.graphicsUVStartsAtTop)}" +
             $"{(dentManager.overrideFlipY ? " (override)" : " (auto)")}\n" +
             $"Debug Stamp All: {dentManager.debugStampAll}";
 
-        GUI.Label(new Rect(10, 20 + displaySize, 340, 140), info);
+        GUI.Label(new Rect(10, 20 + drawHeight, 360, 140), info);
     }
 
     string ChannelLabel() => channel switch

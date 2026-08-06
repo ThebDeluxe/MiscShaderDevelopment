@@ -41,7 +41,8 @@ public class DentVertexUVGenerator : MonoBehaviour
              "each frame. A single centroid is not enough: on a toroid it lands in the hole.")]
     [Range(1, 128)] public int samplesPerIsland = 32;
 
-    public int TextureSize { get; private set; }
+    public int TextureWidth { get; private set; }
+    public int TextureHeight { get; private set; }
     public int VertexCount { get; private set; }
     public bool IsGenerated { get; private set; }
     public Mesh PointMesh { get; private set; }
@@ -79,17 +80,23 @@ public class DentVertexUVGenerator : MonoBehaviour
 
         Vector3[] verts = instancedMesh.vertices;
         VertexCount = verts.Length;
-        TextureSize = Mathf.NextPowerOfTwo(Mathf.CeilToInt(Mathf.Sqrt(VertexCount)));
+
+        // Rectangular, not square. The mapping is i % width, i / width, so it never needed
+        // a square - and forcing one means rounding the side up to a power of two, which
+        // can leave over half the texels unused. A power-of-two width keeps rows aligned
+        // while the height takes only as many rows as there are vertices to store.
+        TextureWidth = Mathf.NextPowerOfTwo(Mathf.CeilToInt(Mathf.Sqrt(VertexCount)));
+        TextureHeight = Mathf.Max(1, Mathf.CeilToInt(VertexCount / (float)TextureWidth));
 
         int[] islandOf = BuildIslands(instancedMesh, verts);
         var uv = new List<Vector4>(VertexCount);
         for (int i = 0; i < VertexCount; i++)
         {
-            int x = i % TextureSize;
-            int y = i / TextureSize;
+            int x = i % TextureWidth;
+            int y = i / TextureWidth;
             // +0.5 puts the coordinate at the exact texel centre.
-            uv.Add(new Vector4((x + 0.5f) / TextureSize,
-                               (y + 0.5f) / TextureSize,
+            uv.Add(new Vector4((x + 0.5f) / TextureWidth,
+                               (y + 0.5f) / TextureHeight,
                                islandOf[i],
                                0f));
         }
@@ -101,7 +108,10 @@ public class DentVertexUVGenerator : MonoBehaviour
         BuildPointMesh(verts, instancedMesh.normals, uv);
 
         IsGenerated = true;
-        Debug.Log($"{name}: dent data generated. {VertexCount} verts -> {TextureSize}x{TextureSize}, " +
+
+        int texels = TextureWidth * TextureHeight;
+        Debug.Log($"{name}: dent data generated. {VertexCount} verts -> {TextureWidth}x{TextureHeight} " +
+                  $"({texels} texels, {(VertexCount / (float)texels):P0} used), " +
                   $"{IslandCount} island(s), on TEXCOORD{targetUVChannel}.", this);
     }
 

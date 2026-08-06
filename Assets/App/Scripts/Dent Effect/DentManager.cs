@@ -236,9 +236,40 @@ public class DentManager : MonoBehaviour
 
         if (!SystemInfo.SupportsRenderTextureFormat(format))
         {
-            Debug.LogWarning($"{name}: {format} unsupported on this device, falling back to ARGBFloat.", this);
-            format = RenderTextureFormat.ARGBFloat;
+            // Fall back DOWN in precision, not up. ARGBFloat is more demanding than
+            // ARGBHalf, so a device rejecting half will almost certainly reject float too.
+            RenderTextureFormat[] candidates =
+            {
+                RenderTextureFormat.ARGBHalf,
+                RenderTextureFormat.ARGBFloat
+            };
+
+            RenderTextureFormat found = RenderTextureFormat.Default;
+            bool ok = false;
+
+            foreach (var candidate in candidates)
+            {
+                if (!SystemInfo.SupportsRenderTextureFormat(candidate)) continue;
+                found = candidate;
+                ok = true;
+                break;
+            }
+
+            if (!ok)
+            {
+                Debug.LogError($"{name}: no signed floating point render texture format is " +
+                               "supported on this device. The dent map stores a signed " +
+                               "displacement vector, so an 8-bit format cannot represent it - " +
+                               "the effect cannot run here.", this);
+                enabled = false;
+                return false;
+            }
+
+            Debug.LogWarning($"{name}: {format} unsupported, falling back to {found}.", this);
+            format = found;
         }
+
+        LogPlatformNotes();
 
         // Our own stamp material, so two managers cannot overwrite each other's uniforms
         // between setting them and the draw actually executing.
@@ -264,6 +295,30 @@ public class DentManager : MonoBehaviour
 
         initialised = true;
         return true;
+    }
+
+    /// <summary>
+    /// Reports the platform assumptions this system makes, once, at startup.
+    ///
+    /// The stamp pass rasterises MeshTopology.Points to write exactly one texel per vertex.
+    /// On OpenGL and WebGL the point size comes from gl_PointSize, which the vertex shader
+    /// has to write - the shader outputs a PSIZE semantic and relies on Unity's cross
+    /// compiler mapping it. If that mapping does not happen the whole map is garbage, and
+    /// there is no way to detect it from script, so it is called out instead.
+    /// </summary>
+    void LogPlatformNotes()
+    {
+        var api = SystemInfo.graphicsDeviceType;
+
+        bool glLike = api == UnityEngine.Rendering.GraphicsDeviceType.OpenGLCore
+                   || api == UnityEngine.Rendering.GraphicsDeviceType.OpenGLES3;
+
+        if (!glLike) return;
+
+        Debug.Log($"{name}: running on {api}. Point size comes from gl_PointSize here, so if " +
+                  "the dent map looks empty or smeared, check that the stamp shader's PSIZE " +
+                  "output is reaching it. Everything else in this system avoids compute, " +
+                  "readback and float filtering, so it is otherwise WebGL 2 safe.", this);
     }
 
     RenderTexture CreateRT(int width, int height)

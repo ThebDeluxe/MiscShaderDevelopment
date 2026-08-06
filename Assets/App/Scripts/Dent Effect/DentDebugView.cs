@@ -58,6 +58,19 @@ public class DentDebugView : MonoBehaviour
         // force one and look. -1 hands control back to automatic selection.
         if (keyboard.leftBracketKey.wasPressedThisFrame) StepForcedLod(-1);
         else if (keyboard.rightBracketKey.wasPressedThisFrame) StepForcedLod(1);
+
+        // Selection bias nudges automatic selection toward more or less detail, which is
+        // the better way to check the levels actually switch under normal conditions.
+        if (keyboard.commaKey.wasPressedThisFrame) StepBias(-0.25f);
+        else if (keyboard.periodKey.wasPressedThisFrame) StepBias(0.25f);
+    }
+
+    void StepBias(float delta)
+    {
+        var renderer = dentManager != null ? dentManager.targetRenderer : null;
+        if (renderer == null) return;
+
+        WriteSelectionBias(renderer, ReadSelectionBias(renderer) + delta);
     }
 
     void StepForcedLod(int direction)
@@ -159,7 +172,9 @@ public class DentDebugView : MonoBehaviour
             ? $"  WARNING: instance kept only {gen.InstanceMeshLodCount}"
             : string.Empty;
 
-        return $"{gen.MeshLodCount} levels, {active}   [ ] to step{lost}";
+        float bias = ReadSelectionBias(dentManager.targetRenderer);
+
+        return $"{gen.MeshLodCount} levels, {active}   [ ] step,  , . bias {bias:0.00}{lost}";
     }
 
     /// <summary>
@@ -178,52 +193,87 @@ public class DentDebugView : MonoBehaviour
     }
 
     static PropertyInfo forcedLodProperty;
-    static bool forcedLodResolved;
+    static PropertyInfo selectionBiasProperty;
+    static bool lodPropertiesResolved;
 
     /// <summary>Whether this Unity version exposes a way to force a Mesh LOD level.</summary>
     static bool forcedLodAvailable => forcedLodProperty != null;
 
+    static void ResolveLodProperties(Renderer renderer)
+    {
+        if (lodPropertiesResolved) return;
+        lodPropertiesResolved = true;
+
+        forcedLodProperty = typeof(Renderer).GetProperty("forceMeshLod",
+                                                         BindingFlags.Public | BindingFlags.Instance);
+        selectionBiasProperty = typeof(Renderer).GetProperty("meshLodSelectionBias",
+                                                             BindingFlags.Public | BindingFlags.Instance);
+
+        if (forcedLodProperty == null)
+            Debug.LogWarning("DentDebugView: no 'forceMeshLod' on Renderer. Mesh LOD forcing is " +
+                             "unavailable; use the Mesh Renderer inspector's Mesh LOD section.");
+    }
+
+    /// <summary>
+    /// Reads forceMeshLod. It is declared as Int16, so unboxing it straight to int throws -
+    /// which, caught, looks exactly like the property not existing. Convert handles the
+    /// widening without caring about the declared type.
+    /// </summary>
     static int ReadForcedLod(Renderer renderer)
     {
         if (renderer == null) return -1;
 
-        if (!forcedLodResolved)
-        {
-            forcedLodResolved = true;
-
-            // The property has moved around between versions, so try the type it is
-            // documented on as well as the base. Reporting failure beats failing silently:
-            // a swallowed miss looks identical to a working API that does nothing.
-            forcedLodProperty =
-                renderer.GetType().GetProperty("forceMeshLod",
-                                               BindingFlags.Public | BindingFlags.Instance)
-                ?? typeof(Renderer).GetProperty("forceMeshLod",
-                                                BindingFlags.Public | BindingFlags.Instance);
-
-            if (forcedLodProperty == null)
-                Debug.LogWarning("DentDebugView: no 'forceMeshLod' property found on " +
-                                 $"{renderer.GetType().Name}. Mesh LOD forcing is unavailable; " +
-                                 "use the Mesh Renderer inspector's Mesh LOD selection bar instead.");
-        }
-
+        ResolveLodProperties(renderer);
         if (forcedLodProperty == null) return -1;
 
-        try { return (int)forcedLodProperty.GetValue(renderer); }
-        catch { return -1; }
+        try { return System.Convert.ToInt32(forcedLodProperty.GetValue(renderer)); }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"DentDebugView: could not read forceMeshLod - {e.Message}");
+            return -1;
+        }
     }
 
     static void WriteForcedLod(Renderer renderer, int level)
     {
         if (renderer == null) return;
 
-        ReadForcedLod(renderer);   // resolves the property and warns once if missing
-
+        ResolveLodProperties(renderer);
         if (forcedLodProperty == null || !forcedLodProperty.CanWrite) return;
 
-        try { forcedLodProperty.SetValue(renderer, level); }
+        try
+        {
+            // Int16 on the native side, so narrow before setting.
+            forcedLodProperty.SetValue(renderer, System.Convert.ToInt16(level));
+        }
         catch (System.Exception e)
         {
             Debug.LogWarning($"DentDebugView: could not set forceMeshLod - {e.Message}");
+        }
+    }
+
+    static float ReadSelectionBias(Renderer renderer)
+    {
+        if (renderer == null) return 0f;
+
+        ResolveLodProperties(renderer);
+        if (selectionBiasProperty == null) return 0f;
+
+        try { return System.Convert.ToSingle(selectionBiasProperty.GetValue(renderer)); }
+        catch { return 0f; }
+    }
+
+    static void WriteSelectionBias(Renderer renderer, float bias)
+    {
+        if (renderer == null) return;
+
+        ResolveLodProperties(renderer);
+        if (selectionBiasProperty == null || !selectionBiasProperty.CanWrite) return;
+
+        try { selectionBiasProperty.SetValue(renderer, bias); }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"DentDebugView: could not set meshLodSelectionBias - {e.Message}");
         }
     }
 

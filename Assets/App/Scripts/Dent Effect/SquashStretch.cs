@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -66,6 +67,19 @@ public class SquashStretch : MonoBehaviour
     [Tooltip("Fallback pivot in local space, used only when no Pivot Collider is set.")]
     public Vector3 pivotLocal = Vector3.zero;
 
+    // Extra colliders folded into the pivot. An assembly has to flatten onto its own lowest
+    // point, not the original character's - otherwise a blob hanging below squashes toward
+    // the character instead of onto the ground.
+    readonly List<Collider> pivotColliders = new List<Collider>();
+
+    /// <summary>Includes a collider when working out where the assembly rests.</summary>
+    public void AddPivotCollider(Collider collider)
+    {
+        if (collider != null && !pivotColliders.Contains(collider)) pivotColliders.Add(collider);
+    }
+
+    public void RemovePivotCollider(Collider collider) => pivotColliders.Remove(collider);
+
     [Header("Debug")]
     public bool drawGizmos = true;
 
@@ -81,6 +95,40 @@ public class SquashStretch : MonoBehaviour
 
     Material material;
     Transform rendererTransform;
+
+    // Extra renderers driven by the same spring - absorbed blobs, for instance. Each has
+    // its own material and object space, but they all share ONE world pivot so the whole
+    // assembly flattens to the same height rather than each part squashing about itself.
+    readonly List<Renderer> extraRenderers = new List<Renderer>();
+    readonly List<Material> extraMaterials = new List<Material>();
+
+    /// <summary>Adds a renderer to be deformed by the same spring.</summary>
+    public void AddRenderer(Renderer renderer)
+    {
+        if (renderer == null || extraRenderers.Contains(renderer)) return;
+
+        Material instance = renderer.material;
+        if (!instance.HasProperty(AxisID) || !instance.HasProperty(AmountID))
+        {
+            Debug.LogWarning($"{name}: '{renderer.name}' has no squash properties, skipping.", this);
+            return;
+        }
+
+        extraRenderers.Add(renderer);
+        extraMaterials.Add(instance);
+    }
+
+    /// <summary>Stops deforming a renderer, leaving it at rest.</summary>
+    public void RemoveRenderer(Renderer renderer)
+    {
+        int index = extraRenderers.IndexOf(renderer);
+        if (index < 0) return;
+
+        if (extraMaterials[index] != null) extraMaterials[index].SetFloat(AmountID, 0f);
+
+        extraRenderers.RemoveAt(index);
+        extraMaterials.RemoveAt(index);
+    }
 
     float lastHeight;
     float springValue;      // signed: positive stretches vertically, negative squashes
@@ -196,33 +244,67 @@ public class SquashStretch : MonoBehaviour
 
     void Push()
     {
-        // World up expressed in the renderer's object space. Because the shader then
-        // transforms the result by that same object matrix, scaling along this axis is
-        // exactly scaling along world up - so a rolling ball still squashes vertically.
-        Vector3 axisOS = rendererTransform.InverseTransformDirection(Vector3.up);
+        Vector3 pivotWS = PivotWorld();
 
-        // The pivot is authored relative to THIS transform, so it has to make the same trip.
-        Vector3 pivotOS = rendererTransform.InverseTransformPoint(PivotWorld());
+        Apply(material, rendererTransform, pivotWS);
 
-        material.SetVector(AxisID, axisOS);
-        material.SetFloat(AmountID, springValue);
-        material.SetVector(PivotID, pivotOS);
+        for (int i = 0; i < extraRenderers.Count; i++)
+        {
+            if (extraRenderers[i] == null) continue;
+            Apply(extraMaterials[i], extraRenderers[i].transform, pivotWS);
+        }
+    }
+
+    /// <summary>
+    /// Pushes the deformation onto one renderer.
+    ///
+    /// The shader works in that renderer's OWN object space, so world up and the shared
+    /// pivot both have to be converted per renderer. Because the shader then transforms the
+    /// result by the same object matrix, scaling along this axis is exactly scaling along
+    /// world up - and every part flattens to the same world height.
+    /// </summary>
+    void Apply(Material target, Transform space, Vector3 pivotWS)
+    {
+        if (target == null || space == null) return;
+
+        target.SetVector(AxisID, space.InverseTransformDirection(Vector3.up));
+        target.SetFloat(AmountID, springValue);
+        target.SetVector(PivotID, space.InverseTransformPoint(pivotWS));
     }
 
     /// <summary>
     /// Where the scaling happens around, in world space.
     ///
-    /// The bottom of the collider rather than its centre: squashing around the centre sinks
-    /// the character into the floor by half the squash, while squashing around the contact
-    /// point keeps it planted and spreads it outward instead.
+    /// The BOTTOM of the combined colliders, at their horizontal centre. Squashing about a
+    /// centre sinks everything into the floor by half the squash; squashing about the
+    /// contact point keeps the assembly planted and spreads it outward instead.
+    ///
+    /// Every collider in the assembly counts, so a blob hanging below the character
+    /// flattens onto the ground rather than toward the character above it. The horizontal
+    /// centre matters too: the perpendicular widening is measured from this point.
     /// </summary>
     Vector3 PivotWorld()
     {
-        if (pivotCollider == null) return transform.TransformPoint(pivotLocal);
+        Bounds combined = default;
+        bool any = false;
 
-        // Bounds are a world-space AABB, which is exact for a sphere.
-        Bounds b = pivotCollider.bounds;
-        return new Vector3(b.center.x, b.min.y, b.center.z);
+        if (pivotCollider != null)
+        {
+            combined = pivotCollider.bounds;
+            any = true;
+        }
+
+        for (int i = 0; i < pivotColliders.Count; i++)
+        {
+            if (pivotColliders[i] == null) continue;
+
+            if (!any) { combined = pivotColliders[i].bounds; any = true; }
+            else combined.Encapsulate(pivotColliders[i].bounds);
+        }
+
+        if (!any) return transform.TransformPoint(pivotLocal);
+
+        return new Vector3(combined.center.x, combined.min.y, combined.center.z);
     }
 
     void OnDisable()
@@ -230,6 +312,9 @@ public class SquashStretch : MonoBehaviour
         // Leave the mesh at rest rather than frozen mid-stretch.
         if (material != null && material.HasProperty(AmountID))
             material.SetFloat(AmountID, 0f);
+
+        for (int i = 0; i < extraMaterials.Count; i++)
+            if (extraMaterials[i] != null) extraMaterials[i].SetFloat(AmountID, 0f);
 
         ResetSpring();
     }

@@ -1,7 +1,8 @@
 using UnityEngine;
 
 /// <summary>
-/// Marks a lump of clay that can be absorbed into the player's assembly.
+/// Marks a lump of clay that can be absorbed into the player's assembly, and thrown back
+/// out again.
 ///
 /// Deliberately thin: the blob already carries its own DentManager, DentContactSource and
 /// dent texture, because the system was made to handle several deforming objects at once.
@@ -19,12 +20,19 @@ public class ClayBlob : MonoBehaviour
 
     public bool Merged { get; private set; }
 
+    /// <summary>False for a moment after being thrown, so it is not instantly re-absorbed.</summary>
+    public bool CanBePickedUp => !Merged && Time.time >= pickupLockUntil;
+
     Rigidbody ownBody;
+    float originalMass = 1f;
+    float pickupLockUntil;
 
     void Awake()
     {
         if (contactSource == null) contactSource = GetComponentInChildren<DentContactSource>();
+
         ownBody = GetComponent<Rigidbody>();
+        if (ownBody != null) originalMass = ownBody.mass;
 
         if (contactSource != null) visualRadius = contactSource.visualRadius;
     }
@@ -50,5 +58,28 @@ public class ClayBlob : MonoBehaviour
 
         // Keep the world pose so the blob does not jump on pickup.
         transform.SetParent(parent, true);
+    }
+
+    /// <summary>
+    /// Cuts the blob loose and gives it its own body back.
+    ///
+    /// The pickup lock matters: without it the merger would find the blob still overlapping
+    /// on the very next frame and swallow it again before it had travelled anywhere.
+    /// </summary>
+    public Rigidbody Detach(float pickupLockSeconds)
+    {
+        Merged = false;
+        transform.SetParent(null, true);
+
+        ownBody = gameObject.AddComponent<Rigidbody>();
+        ownBody.mass = originalMass;
+        ownBody.interpolation = RigidbodyInterpolation.Interpolate;
+
+        // Thrown fast enough to tunnel through thin geometry otherwise.
+        ownBody.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+
+        pickupLockUntil = Time.time + pickupLockSeconds;
+
+        return ownBody;
     }
 }

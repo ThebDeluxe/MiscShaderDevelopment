@@ -1,5 +1,7 @@
+using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 /// <summary>
 /// Absorbs nearby clay blobs into the player, and keeps the resulting assembly coherent.
@@ -36,6 +38,10 @@ public class BlobMerger : MonoBehaviour
     [Tooltip("Controller told about the assembly's effective rolling radius.")]
     public BallCharacterController controller;
 
+    [Tooltip("Deformation driver. Absorbed blobs are registered with it so the whole " +
+             "assembly squashes together, about one shared pivot.")]
+    public SquashStretch squash;
+
     [Header("Pickup")]
     [Tooltip("Layers searched for blobs.")]
     public LayerMask blobMask = ~0;
@@ -44,12 +50,43 @@ public class BlobMerger : MonoBehaviour
              "needing to overlap.")]
     public float pickupPadding = 0.05f;
 
+    [Header("Throwing")]
+    [Tooltip("Camera used for aiming. Leave empty to use the main camera.")]
+    public Camera aimCamera;
+
+    [Tooltip("Aim at the mouse cursor rather than the screen centre. Only useful if the " +
+             "cursor is unlocked - the third person camera locks it by default.")]
+    public bool aimAtCursor = false;
+
+    [Tooltip("How far to look for something to aim at before just firing down the ray.")]
+    public float maxAimDistance = 100f;
+
+    [Tooltip("Layers the aim ray can land on.")]
+    public LayerMask aimMask = ~0;
+
+    [Tooltip("Launch speed, in metres per second.")]
+    public float throwSpeed = 14f;
+
+    [Tooltip("Extra upward speed added to the launch, for a bit of arc.")]
+    public float throwArc = 2f;
+
+    [Tooltip("Seconds spent turning the assembly so the chosen blob faces the target " +
+             "before it is released. 0 fires immediately.")]
+    public float spinDuration = 0.12f;
+
+    [Tooltip("Seconds a thrown blob cannot be re-absorbed, so it actually gets away.")]
+    public float pickupLockSeconds = 0.7f;
+
     [Header("Debug")]
     public bool drawGizmos = true;
 
     readonly List<ClayBlob> merged = new List<ClayBlob>();
     readonly Collider[] overlaps = new Collider[16];
     readonly List<DentContactSource> siblingBuffer = new List<DentContactSource>();
+
+    InputAction throwAction;
+    bool throwing;
+    readonly RaycastHit[] aimHits = new RaycastHit[16];
 
     /// <summary>Blobs currently part of the assembly.</summary>
     public int MergedCount => merged.Count;
@@ -62,15 +99,30 @@ public class BlobMerger : MonoBehaviour
         if (body == null) body = GetComponent<Rigidbody>();
         if (ownContactSource == null) ownContactSource = GetComponentInChildren<DentContactSource>();
         if (controller == null) controller = GetComponent<BallCharacterController>();
+        if (squash == null) squash = GetComponentInChildren<SquashStretch>();
 
         EffectiveRadius = ownContactSource != null ? ownContactSource.visualRadius : 0.5f;
+
+        throwAction = new InputAction("Throw", InputActionType.Button);
+        throwAction.AddBinding("<Mouse>/leftButton");
+        throwAction.AddBinding("<Gamepad>/rightTrigger");
+        throwAction.performed += _ => TryThrow();
     }
+
+    void OnEnable() => throwAction?.Enable();
+    void OnDisable() => throwAction?.Disable();
+    void OnDestroy() => throwAction?.Dispose();
 
     void FixedUpdate()
     {
         if (ownContactSource == null || rollingObject == null) return;
 
         LookForBlobs();
+
+        // Recomputed every step, not just on pickup: the assembly rolls, so a blob that was
+        // underneath swings out to the side and back again constantly. A value captured at
+        // merge time is wrong within a fraction of a second.
+        RefreshGroundProbe();
     }
 
     void LookForBlobs()
@@ -86,7 +138,7 @@ public class BlobMerger : MonoBehaviour
             if (overlaps[i] == null) continue;
 
             var blob = overlaps[i].GetComponentInParent<ClayBlob>();
-            if (blob == null || blob.Merged) continue;
+            if (blob == null || !blob.CanBePickedUp) continue;
 
             // Touching is measured surface to surface, against whichever part of the
             // assembly is nearest rather than its centre.
@@ -117,9 +169,224 @@ public class BlobMerger : MonoBehaviour
         blob.AttachTo(rollingObject);
         merged.Add(blob);
 
+        RegisterForSquash(blob);
+
         RecentrePivot();
         RefreshSiblings();
         RefreshRollingRadius();
+        RefreshGroundProbe();
+    }
+
+    /// <summary>
+    /// Throws one of the absorbed blobs at whatever is being aimed at.
+    ///
+    /// The assembly turns first so the chosen blob ends up on the side it is being thrown
+    /// toward. Without that, a blob on the far side would launch straight through the rest
+    /// of the lump - and since its collider only leaves the shared Rigidbody at the moment
+    /// of release, it would collide with everything on the way out.
+    /// </summary>
+    public bool TryThrow()
+    {
+        if (throwing || merged.Count == 0 || rollingObject == null) return false;
+
+        ClayBlob blob = merged[Random.Range(0, merged.Count)];
+
+        StartCoroutine(ThrowRoutine(blob));
+        return true;
+    }
+
+    IEnumerator ThrowRoutine(ClayBlob blob)
+    {
+        throwing = true;
+
+        Vector3 aimPoint = ResolveAimPoint();
+
+        // Flattened: rolling the assembly over to point a blob upward would look wrong, and
+        // the arc is added separately anyway.
+        Vector3 launchDir = Vector3.ProjectOnPlane(aimPoint - AssemblyCentre(), Vector3.up);
+
+        // Last resort if the aim still collapses - the camera's own facing is always a
+        // sensible direction, and beats normalising something near zero.
+        if (launchDir.sqrMagnitude < 1e-4f)
+        {
+            Camera cam = aimCamera != null ? aimCamera : Camera.main;
+            launchDir = cam != null
+                ? Vector3.ProjectOnPlane(cam.transform.forward, Vector3.up)
+                : rollingObject.forward;
+        }
+
+        if (launchDir.sqrMagnitude < 1e-6f) launchDir = Vector3.forward;
+        launchDir.Normalize();
+
+        yield return SpinToward(blob, launchDir);
+
+        if (blob != null) Release(blob, launchDir * throwSpeed + Vector3.up * throwArc);
+
+        throwing = false;
+    }
+
+    /// <summary>Turns the assembly about its own centre until the blob leads the throw.</summary>
+    IEnumerator SpinToward(ClayBlob blob, Vector3 launchDir)
+    {
+        if (blob == null || spinDuration <= 0f) yield break;
+
+        Vector3 pivot = AssemblyCentre();
+
+        Vector3 current = Vector3.ProjectOnPlane(blob.transform.position - pivot, Vector3.up);
+        if (current.sqrMagnitude < 1e-6f) yield break;   // blob sits on the axis, nothing to turn
+
+        Quaternion turn = Quaternion.FromToRotation(current.normalized, launchDir);
+        Quaternion start = rollingObject.rotation;
+        Quaternion end = turn * start;
+
+        float elapsed = 0f;
+        while (elapsed < spinDuration)
+        {
+            elapsed += Time.deltaTime;
+            float t = Mathf.Clamp01(elapsed / spinDuration);
+
+            // Rotated about the assembly centre, not the transform origin, so the lump
+            // spins in place instead of orbiting.
+            rollingObject.rotation = Quaternion.Slerp(start, end, t);
+            yield return null;
+        }
+
+        rollingObject.rotation = end;
+    }
+
+    /// <summary>
+    /// Where the throw is aimed.
+    ///
+    /// The camera sits behind the character, so a ray through screen centre passes straight
+    /// through the player - and a jump lifts them into the middle of the screen, where they
+    /// swallow the ray entirely. The resulting aim point lands centimetres from the
+    /// assembly, and normalising that near-zero vector produces a direction that looks
+    /// random. So the assembly is skipped, and anything suspiciously close is ignored too.
+    /// </summary>
+    Vector3 ResolveAimPoint()
+    {
+        Camera cam = aimCamera != null ? aimCamera : Camera.main;
+        if (cam == null) return AssemblyCentre() + rollingObject.forward * maxAimDistance;
+
+        // The third person camera locks the cursor, so screen centre is the sensible
+        // default - a locked cursor's position is meaningless.
+        Vector2 screenPoint = aimAtCursor && Mouse.current != null
+            ? Mouse.current.position.ReadValue()
+            : new Vector2(Screen.width * 0.5f, Screen.height * 0.5f);
+
+        Ray ray = cam.ScreenPointToRay(screenPoint);
+
+        Vector3 centre = AssemblyCentre();
+
+        // Anything nearer than this is too close to give a stable direction.
+        float minRange = EffectiveRadius + 1f;
+
+        int count = Physics.RaycastNonAlloc(ray, aimHits, maxAimDistance, aimMask,
+                                            QueryTriggerInteraction.Ignore);
+
+        float nearest = float.MaxValue;
+        Vector3 aimPoint = ray.GetPoint(maxAimDistance);
+
+        for (int i = 0; i < count; i++)
+        {
+            Collider hit = aimHits[i].collider;
+            if (hit == null) continue;
+
+            // Our own assembly is not a target.
+            if (body != null && hit.attachedRigidbody == body) continue;
+
+            if (Vector3.Distance(aimHits[i].point, centre) < minRange) continue;
+
+            if (aimHits[i].distance < nearest)
+            {
+                nearest = aimHits[i].distance;
+                aimPoint = aimHits[i].point;
+            }
+        }
+
+        return aimPoint;
+    }
+
+    /// <summary>Cuts a blob loose, undoing everything Absorb set up.</summary>
+    void Release(ClayBlob blob, Vector3 velocity)
+    {
+        merged.Remove(blob);
+        UnregisterFromSquash(blob);
+
+        Rigidbody thrown = blob.Detach(pickupLockSeconds);
+        thrown.linearVelocity = velocity;
+
+        // A little spin, so it does not sail out looking frozen.
+        thrown.angularVelocity = Random.insideUnitSphere * 6f;
+
+        RecentrePivot();
+        RefreshSiblings();
+        RefreshRollingRadius();
+        RefreshGroundProbe();
+    }
+
+    void UnregisterFromSquash(ClayBlob blob)
+    {
+        if (squash == null) return;
+
+        var renderers = blob.GetComponentsInChildren<MeshRenderer>(true);
+        for (int i = 0; i < renderers.Length; i++) squash.RemoveRenderer(renderers[i]);
+
+        var colliders = blob.GetComponentsInChildren<Collider>(true);
+        for (int i = 0; i < colliders.Length; i++) squash.RemovePivotCollider(colliders[i]);
+    }
+
+    /// <summary>
+    /// Hands the blob's renderers to the squash driver, so the whole assembly deforms
+    /// together about one shared world pivot rather than each part squashing about itself.
+    /// </summary>
+    void RegisterForSquash(ClayBlob blob)
+    {
+        if (squash == null) return;
+
+        var renderers = blob.GetComponentsInChildren<MeshRenderer>(false);
+        for (int i = 0; i < renderers.Length; i++)
+            squash.AddRenderer(renderers[i]);
+
+        // Fold the blob into the squash pivot, so the assembly flattens onto ITS lowest
+        // point rather than the character's.
+        var colliders = blob.GetComponentsInChildren<Collider>(false);
+        for (int i = 0; i < colliders.Length; i++)
+        {
+            if (colliders[i].isTrigger) continue;
+            squash.AddPivotCollider(colliders[i]);
+        }
+    }
+
+    /// <summary>
+    /// How far the assembly hangs below the body, so the controller's ground check can reach
+    /// past an absorbed blob.
+    ///
+    /// A blob resting on the ground IS the assembly touching the ground, but its collider
+    /// belongs to the same Rigidbody and so is skipped by the check. Extending the reach to
+    /// the assembly's lowest point lets the cast find the real ground underneath it.
+    /// </summary>
+    void RefreshGroundProbe()
+    {
+        if (controller == null) return;
+
+        float bodyY = body != null ? body.position.y : transform.position.y;
+        float lowest = 0f;
+
+        for (int i = 0; i < merged.Count; i++)
+        {
+            var colliders = merged[i].GetComponentsInChildren<Collider>(false);
+
+            for (int c = 0; c < colliders.Length; c++)
+            {
+                if (colliders[c].isTrigger) continue;
+
+                float drop = bodyY - colliders[c].bounds.min.y;
+                if (drop > lowest) lowest = drop;
+            }
+        }
+
+        controller.GroundProbeExtension = lowest;
     }
 
     /// <summary>

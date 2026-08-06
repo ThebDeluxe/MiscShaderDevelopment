@@ -62,6 +62,14 @@ public class BallCharacterController : MonoBehaviour
         set => rollingRadius = Mathf.Max(0.01f, value);
     }
 
+    /// <summary>
+    /// How much further down the ground check has to reach, because absorbed blobs hang
+    /// below the body. Set by BlobMerger.
+    /// </summary>
+    public float GroundProbeExtension { get; set; }
+
+    private readonly RaycastHit[] groundHits = new RaycastHit[8];
+
     [Header("Movement")]
     [Tooltip("Camera that movement is relative to. W goes away from it. Leave empty to " +
              "find one automatically, or to fall back to world axes if there is none.")]
@@ -478,15 +486,31 @@ public class BallCharacterController : MonoBehaviour
     {
         // Cast a small sphere just below the ball to detect ground. Uses the PHYSICAL
         // radius, not the visual one, so it agrees with what actually collides.
-        float castDistance = groundCheckPadding + 0.05f;
-        isGrounded = Physics.SphereCast(
-            positionBody.position,
-            innerRadius * 0.9f,
-            Vector3.down,
-            out _,
-            (innerRadius - innerRadius * 0.9f) + castDistance,
-            groundMask,
-            QueryTriggerInteraction.Ignore);
+        float radius = innerRadius * 0.9f;
+
+        // Absorbed blobs hang below the body and their colliders belong to the same
+        // Rigidbody, so a SphereCast started here begins overlapping them - and Unity does
+        // not report colliders a sweep starts inside. Without extending the reach and
+        // skipping our own assembly, standing on a blob reads as airborne and jumping
+        // becomes impossible.
+        float distance = (innerRadius - radius) + groundCheckPadding + 0.05f
+                         + Mathf.Max(0f, GroundProbeExtension);
+
+        int count = Physics.SphereCastNonAlloc(positionBody.position, radius, Vector3.down,
+                                               groundHits, distance, groundMask,
+                                               QueryTriggerInteraction.Ignore);
+
+        isGrounded = false;
+
+        for (int i = 0; i < count; i++)
+        {
+            // Parts of our own assembly are not ground.
+            if (groundHits[i].collider == null) continue;
+            if (groundHits[i].collider.attachedRigidbody == positionBody) continue;
+
+            isGrounded = true;
+            break;
+        }
     }
 
     private void OnJumpStarted(InputAction.CallbackContext ctx)

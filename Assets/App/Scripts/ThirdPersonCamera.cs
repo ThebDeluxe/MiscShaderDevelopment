@@ -55,6 +55,12 @@ public class ThirdPersonCamera : MonoBehaviour
     [SerializeField] private LayerMask obstructionMask = ~0;
     [SerializeField] private float cameraRadius = 0.25f;
 
+    [Tooltip("Colliders on this Rigidbody are never treated as obstructions. Left empty, it " +
+             "is found from the target - which matters once the player picks things up, " +
+             "since absorbed objects sit around the pivot and would otherwise sweep through " +
+             "the camera's line and yank it in as they roll.")]
+    [SerializeField] private Rigidbody ignoreBody;
+
     [Tooltip("Never come closer to the target than this, however blocked the view is. " +
              "Stops the camera diving into the character or through the floor.")]
     [SerializeField] private float minObstructionDistance = 1.2f;
@@ -81,6 +87,7 @@ public class ThirdPersonCamera : MonoBehaviour
     private Vector3 followVelocity;
     private float currentDistance;
     private float distanceVelocity;
+    private readonly RaycastHit[] obstructionHits = new RaycastHit[16];
 
     /// <summary>Camera forward flattened onto the ground plane. Use this to steer movement.</summary>
     public Vector3 PlanarForward
@@ -119,6 +126,9 @@ public class ThirdPersonCamera : MonoBehaviour
 
         if (target != null)
             smoothedPivot = target.position + targetOffset;
+
+        if (ignoreBody == null && target != null)
+            ignoreBody = target.GetComponentInParent<Rigidbody>();
     }
 
     private void OnEnable()
@@ -233,13 +243,33 @@ public class ThirdPersonCamera : MonoBehaviour
     /// </summary>
     private float DistanceToObstruction(Vector3 pivot, Vector3 direction)
     {
-        if (!Physics.SphereCast(pivot, cameraRadius, direction, out RaycastHit hit, distance,
-                                obstructionMask, QueryTriggerInteraction.Ignore))
-            return distance;
+        int count = Physics.SphereCastNonAlloc(pivot, cameraRadius, direction, obstructionHits,
+                                               distance, obstructionMask,
+                                               QueryTriggerInteraction.Ignore);
 
-        if (hit.distance <= 1e-4f) return minObstructionDistance;
+        float nearest = distance;
 
-        return Mathf.Clamp(hit.distance - collisionPadding, minObstructionDistance, distance);
+        for (int i = 0; i < count; i++)
+        {
+            Collider hit = obstructionHits[i].collider;
+            if (hit == null) continue;
+
+            // Anything riding on the target is part of the thing we are looking AT, not
+            // something in the way of it.
+            if (ignoreBody != null && hit.attachedRigidbody == ignoreBody) continue;
+
+            // A sweep that starts already overlapping reports distance zero with a zero
+            // normal. Taken at face value that slams the camera onto the pivot, and the
+            // next frame - no longer overlapping - it snaps back out. That flip-flop is the
+            // jitter you get grazing the ground, so treat it as fully blocked instead.
+            float d = obstructionHits[i].distance <= 1e-4f
+                ? minObstructionDistance
+                : Mathf.Max(obstructionHits[i].distance - collisionPadding, minObstructionDistance);
+
+            if (d < nearest) nearest = d;
+        }
+
+        return Mathf.Clamp(nearest, minObstructionDistance, distance);
     }
 
     private void OnValidate()

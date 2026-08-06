@@ -69,6 +69,13 @@ public class DentContactSource : MonoBehaviour
              "in and out.")]
     public float minSink = 0.005f;
 
+    [Tooltip("How merged siblings interface with each other.\n\n" +
+             "OFF treats a sibling like any other rounded collider, so the pair press " +
+             "spherical dents into each other.\n\n" +
+             "ON gives them a flat disc at the radical plane between their centres, which " +
+             "is what two clay balls squashed together would actually share.")]
+    public bool flatSiblingInterfaces = false;
+
     [Header("Edge Clamping")]
     [Tooltip("Measure how far each surface actually extends, so the flattening stops at a " +
              "ledge instead of pressing out over the drop.")]
@@ -158,6 +165,11 @@ public class DentContactSource : MonoBehaviour
     {
         siblings.Clear();
         siblingColliders.Clear();
+
+        // Without flat interfaces there is nothing special to do: leaving the list empty
+        // lets the ordinary overlap pass pick each sibling up as the rounded collider it
+        // actually is.
+        if (!flatSiblingInterfaces) return;
 
         for (int i = 0; i < all.Count; i++)
         {

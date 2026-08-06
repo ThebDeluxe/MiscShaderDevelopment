@@ -84,6 +84,10 @@ PrefabInstance:
       propertyPath: m_Layer
       value: 7
       objectReference: {fileID: 0}
+    - target: {fileID: -1334862577408428053, guid: 5a1eef63ef898e24c925f2b92ffb384a, type: 3}
+      propertyPath: m_IsActive
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 919132149155446097, guid: 5a1eef63ef898e24c925f2b92ffb384a, type: 3}
       propertyPath: m_Name
       value: Clay_Ball
@@ -98,7 +102,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 1012991283249610560, guid: 5a1eef63ef898e24c925f2b92ffb384a, type: 3}
       propertyPath: m_IsActive
-      value: 0
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 7832741708229284962, guid: 5a1eef63ef898e24c925f2b92ffb384a, type: 3}
       propertyPath: 'm_Materials.Array.data[0]'
@@ -150,8 +154,8 @@ MonoBehaviour:
   _hideMode: 0
   _rerollOnRuntimeAwake: 1
   _lockSelection: 0
-  _selectedIndex: 2
-  _identity: GlobalObjectId_V1-2-2b7ba337bcf87244686c8e7da8950e13-7256363935418130665-7412659814270144608
+  _selectedIndex: 3
+  _identity: GlobalObjectId_V1-2-fe03ab5c94aabb840be5e3d8800a8ad4-7256363935418130665-0
   _rerollSalt: 0
 --- !u!114 &4846729651411530844
 MonoBehaviour:
@@ -200,11 +204,11 @@ MonoBehaviour:
   targetRenderer: {fileID: 0}
   stampMaterial: {fileID: 2100000, guid: 6593a7ea94a518844b433590a9867d20, type: 2}
   format: 2
-  decayPerSecond: 0.15
+  decayPerSecond: 0.9
   decayDepthBias: 0
   filterSourcesByBounds: 1
   boundsPadding: 0.05
-  islandRigidity: 1
+  islandRigidity: 0
   rigidBelowRadius: 0.1
   flexibleAboveRadius: 0.35
   debugStampAll: 0
@@ -227,12 +231,13 @@ MonoBehaviour:
   surfaceMask:
     serializedVersion: 2
     m_Bits: 4294967295
-  sampleDirections: 24
+  sampleDirections: 12
   curvatureSampleSpread: 0.3
   maxSurfaceRadius: 50
   mergeAngle: 25
   maxSources: 3
   minSink: 0.005
+  flatSiblingInterfaces: 0
   clampToEdges: 1
   edgeProbeSteps: 4
   edgeProbeTolerance: 0.06
@@ -243,8 +248,8 @@ MonoBehaviour:
   planeEdgeSoftness: 0.25
   flattenScale: 0.15
   strength: 1
-  rimBulge: 0.75
-  bulgeReach: 1.15
+  rimBulge: 1
+  bulgeReach: 1.75
   bulgeClamp: 0.3
   decayMultiplier: 2
   drawGizmos: 1
@@ -269,7 +274,7 @@ SphereCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Radius: 0.2
+  m_Radius: 0.15
   m_Center: {x: 0, y: 0, z: 0}
 --- !u!54 &6700592281054027276
 Rigidbody:

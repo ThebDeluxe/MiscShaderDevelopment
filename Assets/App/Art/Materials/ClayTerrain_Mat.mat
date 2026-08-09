@@ -50,6 +50,18 @@ Material:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
+    - _ClayTextureWobbleObjectSpace_103f750c6b48411e9c5835342fa34839_Diffuse_404131503_Texture2D:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _ClayTextureWobbleWorldSpace_1d6dc9837507496682a3f0b4a2f039e8_Diffuse_404131503_Texture2D:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    - _ClayTextureWobble_103f750c6b48411e9c5835342fa34839_Diffuse_404131503_Texture2D:
+        m_Texture: {fileID: 0}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
     - _DefaultWhiteTex:
         m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
@@ -159,10 +171,13 @@ Material:
     - _AddPrecomputedVelocity: 0
     - _AlphaClip: 0
     - _AlphaToMask: 0
+    - _BandCount: 2
+    - _BandHeight: 0.98
+    - _BandOffset: 0.59
     - _Blend: 0
     - _BlendModePreserveSpecular: 1
     - _BumpScale: 1
-    - _Clay_Tiling: 1
+    - _Clay_Tiling: 0.125
     - _ClearCoatMask: 0
     - _ClearCoatSmoothness: 0
     - _Cull: 2
@@ -173,18 +188,22 @@ Material:
     - _DstBlendAlpha: 0
     - _EnableInstancedPerPixelNormal: 1
     - _EnvironmentReflections: 1
-    - _Fresnel_Amount: 0.5
+    - _Fresnel_Amount: 0.25
     - _GlossMapScale: 0
     - _Glossiness: 0
     - _GlossyReflections: 0
+    - _LineWidth: 0.2
+    - _Line_Falloff: 2
     - _Metallic: 0
     - _Metallic0: 0
     - _Metallic1: 0
     - _Metallic2: 0
     - _Metallic3: 0
     - _Noise_Tiling: 1
+    - _Normal_Strength: -1
     - _OcclusionStrength: 1
     - _Parallax: 0.005
+    - _QueueControl: 0
     - _QueueOffset: 0
     - _ReceiveShadows: 1
     - _Smoothness: 0.5
@@ -207,6 +226,7 @@ Material:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
+    - _LineColor: {r: 1, g: 1, b: 1, a: 1}
     - _SpecColor: {r: 0.19999996, g: 0.19999996, b: 0.19999996, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

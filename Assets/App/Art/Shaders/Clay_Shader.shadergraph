@@ -2363,8 +2363,8 @@
     "m_ObjectId": "81987b0287104d9db9b28ef06fd61de5",
     "m_Title": "Vertex Dent",
     "m_Position": {
-        "x": -2041.0001220703125,
-        "y": -1274.0001220703125
+        "x": -2041.0,
+        "y": -1274.0
     }
 }
 
@@ -3981,7 +3981,7 @@
     "m_Group": {
         "m_Id": ""
     },
-    "m_Name": "Vertex Wobble",
+    "m_Name": "Vertex Wobble Object Space",
     "m_DrawState": {
         "m_Expanded": true,
         "m_Position": {

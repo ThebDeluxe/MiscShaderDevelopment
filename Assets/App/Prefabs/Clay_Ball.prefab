@@ -132,7 +132,7 @@ PrefabInstance:
       addedObject: {fileID: 770547477151679028}
     - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 5a1eef63ef898e24c925f2b92ffb384a, type: 3}
       insertIndex: -1
-      addedObject: {fileID: 6700592281054027276}
+      addedObject: {fileID: 2068362991009561858}
   m_SourcePrefab: {fileID: 100100000, guid: 5a1eef63ef898e24c925f2b92ffb384a, type: 3}
 --- !u!1 &5890885620145057565 stripped
 GameObject:
@@ -187,7 +187,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 351b104fa5ea2334fb178b148ade7f2d, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ClayBlob
-  visualRadius: 0.35
+  innerRadius: 0.15
+  outerRadius: 0.35
+  manageColliders: 1
+  innerMaterial: {fileID: 13400000, guid: 103a7413afe344d489070d47d268c84d, type: 2}
+  disableCollidersWhenMerged: 0
+  mergedColliderScale: 0.4
   contactSource: {fileID: 0}
 --- !u!114 &4409600814987039034
 MonoBehaviour:
@@ -275,9 +280,9 @@ SphereCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Radius: 0.25
+  m_Radius: 0.15
   m_Center: {x: 0, y: 0, z: 0}
---- !u!54 &6700592281054027276
+--- !u!54 &2068362991009561858
 Rigidbody:
   m_ObjectHideFlags: 0
   m_CorrespondingSourceObject: {fileID: 0}
@@ -285,7 +290,7 @@ Rigidbody:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 5890885620145057565}
   serializedVersion: 5
-  m_Mass: 1
+  m_Mass: 0.1
   m_LinearDamping: 0
   m_AngularDamping: 0.05
   m_CenterOfMass: {x: 0, y: 0, z: 0}

@@ -54,6 +54,22 @@ public class ClayCharacterController : MonoBehaviour
              "resolve contacts.")]
     [SerializeField] private PhysicsMaterial outerMaterial;
 
+    [Header("Contact Softness")]
+    [Tooltip("How fast the solver may push the assembly out of something it overlaps, in " +
+             "metres per second.\n\n" +
+             "This is the softness dial for a LUMPY assembly. Unity's default is effectively " +
+             "unlimited, so an attached blob catching an edge is ejected instantly and reads " +
+             "as a hard bump. Low values resolve the same overlap over several frames, which " +
+             "reads as clay giving way - and unlike making the collider a trigger, the " +
+             "contact stays real, so friction and support are untouched.\n\n" +
+             "1 to 3 is soft. 0 disables the limit.")]
+    [SerializeField] private float maxDepenetrationSpeed = 2f;
+
+    [Tooltip("Distance at which contacts start being generated. Slightly larger than the " +
+             "default gives the solver more warning, so it eases into a contact instead of " +
+             "discovering it at full penetration.")]
+    [SerializeField] private float contactOffset = 0.02f;
+
     private SphereCollider innerCollider;
     private SphereCollider outerCollider;
 
@@ -62,11 +78,37 @@ public class ClayCharacterController : MonoBehaviour
     // radius of its own.
     private float rollingRadius;
 
-    /// <summary>Effective radius the assembly rolls at. Set by BlobMerger when blobs merge.</summary>
+    /// <summary>
+    /// Effective radius the assembly rolls at, and the size its collision sphere is grown
+    /// to. Set by BlobMerger when blobs merge.
+    /// </summary>
     public float RollingRadius
     {
         get => rollingRadius;
         set => rollingRadius = Mathf.Max(0.01f, value);
+    }
+
+    /// <summary>
+    /// Grows the collision and visual spheres to cover an assembly.
+    ///
+    /// Only used when absorbed blobs give up their own colliders - see
+    /// ClayBlob.disableCollidersWhenMerged. With that off the assembly keeps its lumpy
+    /// shape and this is not called, so the character's own sphere stays as authored.
+    /// </summary>
+    public void SetAssemblyRadius(float assemblyRadius)
+    {
+        // Held in the same proportion as the original, so the mesh keeps sinking by the
+        // same fraction and dents stay consistent as the assembly grows.
+        float ratio = outerRadius > 0.01f ? innerRadius / outerRadius : 0.6f;
+
+        outerRadius = Mathf.Max(assemblyRadius, 0.01f);
+        innerRadius = outerRadius * ratio;
+
+        if (innerCollider != null) innerCollider.radius = innerRadius;
+        if (outerCollider != null) outerCollider.radius = outerRadius;
+
+        rollingRadius = innerRadius;
+        spinRadius = outerRadius;
     }
 
     /// <summary>
@@ -232,6 +274,12 @@ public class ClayCharacterController : MonoBehaviour
             // glaring once a camera is locked to the body.
             if (positionBody.interpolation == RigidbodyInterpolation.None)
                 positionBody.interpolation = RigidbodyInterpolation.Interpolate;
+
+            // Softens how a lumpy assembly rolls over things. The default is effectively
+            // unlimited, which is what makes an attached blob catching an edge feel like a
+            // hard bump rather than clay giving way.
+            if (maxDepenetrationSpeed > 0f)
+                positionBody.maxDepenetrationVelocity = maxDepenetrationSpeed;
         }
 
         if (rollingObject == null)
@@ -293,6 +341,7 @@ public class ClayCharacterController : MonoBehaviour
         innerCollider.radius = innerRadius;
         innerCollider.isTrigger = false;
         if (innerMaterial != null) innerCollider.sharedMaterial = innerMaterial;
+        if (contactOffset > 0f) innerCollider.contactOffset = contactOffset;
 
         outerCollider = FindOrCreate(bodyTransform, "Collider (Outer)");
         outerCollider.radius = outerRadius;

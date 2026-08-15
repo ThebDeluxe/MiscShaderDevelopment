@@ -103,6 +103,9 @@ public class BlobMerger : MonoBehaviour
     /// <summary>Blobs currently part of the assembly.</summary>
     public int MergedCount => merged.Count;
 
+    /// <summary>The absorbed blobs, for anything that needs to act on them each step.</summary>
+    public IReadOnlyList<ClayBlob> MergedBlobs => merged;
+
     /// <summary>Radius of a sphere with the assembly's combined volume. Drives rolling.</summary>
     public float EffectiveRadius { get; private set; }
 
@@ -201,6 +204,10 @@ public class BlobMerger : MonoBehaviour
         RefreshSiblings();
         RefreshRollingRadius();
         RefreshGroundProbe();
+
+        // Blobs no longer carry their own colliders, so the assembly hangs no lower than
+        // its own sphere - nothing to reach past.
+        if (controller != null) controller.GroundProbeExtension = 0f;
     }
 
     /// <summary>
@@ -470,7 +477,10 @@ public class BlobMerger : MonoBehaviour
 
         EffectiveRadius = Mathf.Pow(volume, 1f / 3f);
 
-        if (controller != null) controller.RollingRadius = EffectiveRadius;
+        // The character's sphere becomes the assembly's whole collision shape, since
+        // absorbed blobs have given up their own colliders. One sphere means one clean
+        // ground contact, which is where friction and support come from.
+        if (controller != null) controller.SetAssemblyRadius(EffectiveRadius);
     }
 
     static float Cube(float v) => v * v * v;

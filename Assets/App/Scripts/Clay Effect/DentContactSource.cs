@@ -137,6 +137,46 @@ public class DentContactSource : MonoBehaviour
     /// <summary>Skips the frame's work. Set by DentLOD to throttle at distance.</summary>
     [System.NonSerialized] public bool paused;
 
+    /// <summary>How far the visible mesh overlaps a surface, and which way to push out.</summary>
+    public readonly struct SurfaceOverlap
+    {
+        public readonly Vector3 Point;
+        public readonly Vector3 Normal;   // from the surface toward this object
+        public readonly float Depth;
+        public readonly float Weight;     // 0..1 fade, so forces ease in and out with it
+
+        public SurfaceOverlap(Vector3 point, Vector3 normal, float depth, float weight)
+        {
+            Point = point;
+            Normal = normal;
+            Depth = depth;
+            Weight = weight;
+        }
+    }
+
+    /// <summary>
+    /// Surfaces the visible mesh is currently overlapping.
+    ///
+    /// Already gathered for the dent effect, so anything wanting soft collision can push
+    /// against these rather than paying for its own queries.
+    /// </summary>
+    public int GetSurfaceOverlaps(SurfaceOverlap[] buffer)
+    {
+        int count = 0;
+
+        for (int i = 0; i < tracked.Count && count < buffer.Length; i++)
+        {
+            // Siblings share our Rigidbody, so pushing away from one is pushing away from
+            // ourselves - a self-force that just shoves the whole assembly sideways.
+            if (tracked[i].isSibling) continue;
+
+            buffer[count++] = new SurfaceOverlap(tracked[i].point, tracked[i].pressAxis,
+                                                 tracked[i].sink, tracked[i].weight);
+        }
+
+        return count;
+    }
+
     [Tooltip("Draw every edge probe: green where the surface was found to continue, red " +
              "where it was not. If red dots never appear past a ledge, the probe is the " +
              "problem; if they do but the plane still presses out there, the problem is " +
@@ -193,6 +233,7 @@ public class DentContactSource : MonoBehaviour
 
     Vector3[] directions;
     int builtDirectionCount;
+    Rigidbody ownBody;
 
     static readonly ProfilerMarker MarkerProbe = new ProfilerMarker("DentContact.Probe");
     static readonly ProfilerMarker MarkerTrack = new ProfilerMarker("DentContact.Track");
@@ -208,6 +249,9 @@ public class DentContactSource : MonoBehaviour
         public float radius;       // curved surfaces: radius of the surface it sits on
         public float bulgeRadius;  // curved surfaces: radius of the contact patch
         public float curvature;    // 1/R, 0 for a flat face
+
+        // True when this is another blob in the same assembly rather than the world.
+        public bool isSibling;
 
         // Running curvature estimate, gathered as samples of the same surface merge in.
         public float curvatureSum;
@@ -238,6 +282,7 @@ public class DentContactSource : MonoBehaviour
         public float bulgeRadius;
         public float curvature;
         public float weight;       // 0..1, fades in and out
+        public bool isSibling;
 
         // Signed extents in the plane's own basis, measured from the contact point.
         // Signed rather than a half size so an off-centre face keeps its asymmetry: the
@@ -254,6 +299,7 @@ public class DentContactSource : MonoBehaviour
         if (paused) return;
 
         if (owner == null) owner = GetComponentInParent<DentManager>();
+        if (ownBody == null) ownBody = GetComponentInParent<Rigidbody>();
 
         EnsureDirections();
 
@@ -314,9 +360,17 @@ public class DentContactSource : MonoBehaviour
         {
             Collider col = overlaps[i];
             if (col == null) continue;
+
+            // Anything on our own Rigidbody is part of us, not the world. Hierarchy alone
+            // is not enough to tell: merging parents a blob under the character, so from
+            // the character's side the blob is a child, but from the blob's side the
+            // character's colliders are not - they would sail straight through this test
+            // and be treated as ordinary geometry to push away from.
+            if (ownBody != null && col.attachedRigidbody == ownBody) continue;
             if (col.transform.IsChildOf(transform)) continue;
 
-            // Merged siblings get a flat interface instead of a curved one.
+            // Merged siblings get their interface from ProbeSibling instead, which knows to
+            // tag it as one of ours.
             if (siblingColliders.Contains(col)) continue;
 
             if (col is BoxCollider box) ProbeBox(box, centre, mergeDot);
@@ -530,7 +584,8 @@ public class DentContactSource : MonoBehaviour
         AddCurvedContact(ClosestPointOnSegment(a, b, centre), radius, centre, mergeDot);
     }
 
-    void AddCurvedContact(Vector3 surfaceCentre, float radius, Vector3 centre, float mergeDot)
+    void AddCurvedContact(Vector3 surfaceCentre, float radius, Vector3 centre, float mergeDot,
+                          bool isSibling = false)
     {
         Vector3 toCharacter = centre - surfaceCentre;
         float distance = toCharacter.magnitude;
@@ -551,6 +606,7 @@ public class DentContactSource : MonoBehaviour
             point = surfaceCentre + normal * radius,
             pressAxis = normal,
             radius = radius,
+            isSibling = isSibling,
             sink = sink,
 
             // Radius of the contact patch, from the effective radius of two touching
@@ -651,6 +707,9 @@ public class DentContactSource : MonoBehaviour
                                  surfaceMask, QueryTriggerInteraction.Ignore))
                 continue;
 
+            // Same reasoning as the overlap pass: our own assembly is not the world.
+            if (ownBody != null && hit.collider.attachedRigidbody == ownBody) continue;
+
             // Boxes, rounded primitives and convex meshes were already handled directly.
             if (hit.collider is BoxCollider || hit.collider is SphereCollider
                 || hit.collider is CapsuleCollider) continue;
@@ -703,7 +762,7 @@ public class DentContactSource : MonoBehaviour
         {
             // Treat the sibling as the sphere it is. AddCurvedContact does the rest, so
             // this shares every downstream behaviour with a real SphereCollider contact.
-            AddCurvedContact(otherCentre, rb, centre, mergeDot);
+            AddCurvedContact(otherCentre, rb, centre, mergeDot, true);
             return;
         }
 
@@ -729,6 +788,7 @@ public class DentContactSource : MonoBehaviour
             right = basis * Vector3.right,
             sink = sink,
             curvature = 0f,          // flat: the interface is a plane, not a curve
+            isSibling = true,
             hasExtents = true,
             minX = -disc, maxX = disc,
             minY = -disc, maxY = disc
@@ -819,6 +879,7 @@ public class DentContactSource : MonoBehaviour
                     radius = contact.radius,
                     bulgeRadius = contact.bulgeRadius,
                     curvature = contact.curvature,
+                    isSibling = contact.isSibling,
                     sink = contact.sink,
                     weight = 0f
                 };
@@ -835,6 +896,7 @@ public class DentContactSource : MonoBehaviour
                 match.radius = Mathf.Lerp(match.radius, contact.radius, k);
                 match.bulgeRadius = Mathf.Lerp(match.bulgeRadius, contact.bulgeRadius, k);
                 match.curvature = Mathf.Lerp(match.curvature, contact.curvature, k);
+                match.isSibling = contact.isSibling;
 
                 if (contact.hasExtents)
                     match.right = Vector3.Slerp(match.right, contact.right, k).normalized;

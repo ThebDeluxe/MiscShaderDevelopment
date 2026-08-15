@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 4192387480525380367}
   - component: {fileID: 6588635645056384827}
+  - component: {fileID: 9136238580414757555}
   - component: {fileID: 4807807607735546416}
   - component: {fileID: 8682507769724385475}
   - component: {fileID: 710889707551558549}
@@ -69,6 +70,28 @@ MonoBehaviour:
   throwArc: 2
   spinDuration: 0.12
   pickupLockSeconds: 0.7
+  drawGizmos: 1
+--- !u!114 &9136238580414757555
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2782824578610637868}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 132a88d4c7c02f4448d4cdda68aa7e74, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SoftBlobContacts
+  body: {fileID: 0}
+  merger: {fileID: 6588635645056384827}
+  includeOwnBody: 1
+  ownContactSource: {fileID: 0}
+  stiffness: 120
+  damping: 12
+  maxOverlap: 0.3
+  minOverlap: 0.01
+  ownBodyScale: 0.35
   drawGizmos: 1
 --- !u!114 &4807807607735546416
 MonoBehaviour:
@@ -217,13 +240,16 @@ MonoBehaviour:
   manageColliders: 1
   innerMaterial: {fileID: 13400000, guid: 103a7413afe344d489070d47d268c84d, type: 2}
   outerMaterial: {fileID: 0}
+  maxDepenetrationSpeed: 2
+  contactOffset: 0.02
   rollTorque: 5
   brakeTorque: 1
   restAngularThreshold: 1
   restLinearThreshold: 1
   tractionLimit: 2.75
   spinRadius: 0.7
-  slipAssist: 100
+  slipAssist: 30
+  matchSpinToTravel: 1
   airControl: 30
   airSpeedCap: 0.9
   steeringCamera: {fileID: 0}

@@ -105,6 +105,32 @@ public class ClayCharacterController : MonoBehaviour
              "responsive without the ball visibly slipping.")]
     [SerializeField] private float tractionLimit = 5f;
 
+    [Tooltip("Radius the ball APPEARS to roll on.\n\n" +
+             "Friction ties spin to travel through the contact radius, so a ball that " +
+             "contacts at 0.4 must spin at v/0.4 - far too fast for a 0.7 mesh. Setting " +
+             "this to the visible radius drives the spin at the rate that looks right and " +
+             "makes up the travel directly, letting the contact slip.\n\n" +
+             "Nothing shows the slip on a featureless ball, and it breaks the link between " +
+             "spin rate and dent depth - so the collider can stay small enough for deep " +
+             "dents while still looking like it rolls at its own size.\n\n" +
+             "0 uses the physical contact radius, which is physically honest but couples " +
+             "the two.")]
+    [SerializeField] private float spinRadius = 0.7f;
+
+    [Tooltip("How hard travel is corrected toward the target while slipping.\n\n" +
+             "Under-spinning means friction pulls backward, so this has to overcome it. " +
+             "Applied as acceleration, and only used when Spin Radius differs from the " +
+             "contact radius.")]
+    [SerializeField] private float slipAssist = 30f;
+
+    [Tooltip("Force the spin to exactly match travel, rather than steering toward it.\n\n" +
+             "Applying torque toward a target the contact friction disagrees with is a " +
+             "negotiation, and friction wins some of it - the ball settles faster than " +
+             "asked. Matching outright guarantees the rate the eye is judging.\n\n" +
+             "Cost: spin imparted by collisions is overwritten while grounded, so knocks no " +
+             "longer set it tumbling.")]
+    [SerializeField] private bool matchSpinToTravel = true;
+
     [Tooltip("Acceleration available while airborne, where there is no friction to roll " +
              "against and torque would do nothing.")]
     [SerializeField] private float airControl = 12f;
@@ -451,14 +477,16 @@ public class ClayCharacterController : MonoBehaviour
         }
 
         // The radius that actually touches the ground. Friction ties travel to spin through
-        // THIS, not the visible size - so using anything else here silently caps the top
-        // speed at the ratio between the two.
-        float radius = Mathf.Max(rollingRadius, 0.01f);
+        // THIS, not the visible size.
+        float contactRadius = Mathf.Max(rollingRadius, 0.01f);
 
-        // The spin that would carry the assembly at moveSpeed: omega = v / r, about the
-        // axis across the direction of travel.
+        // The radius the spin is DRIVEN at, which may deliberately differ - see spinRadius.
+        float visualRadius = spinRadius > 0.01f ? spinRadius : contactRadius;
+
+        // The spin that would carry the assembly at moveSpeed, about the axis across the
+        // direction of travel.
         Vector3 targetAngular = steering
-            ? Vector3.Cross(Vector3.up, desiredDir) * (moveSpeed / radius)
+            ? Vector3.Cross(Vector3.up, desiredDir) * (moveSpeed / visualRadius)
             : Vector3.zero;
 
         if (!steering && TryComeToRest()) return;
@@ -473,11 +501,64 @@ public class ClayCharacterController : MonoBehaviour
         // Cap at what friction can actually transmit. Beyond mu * m * g * r the contact
         // patch slips, which reads as spinning on the spot rather than accelerating.
         float maxTorque = tractionLimit * positionBody.mass
-                          * Physics.gravity.magnitude * radius;
+                          * Physics.gravity.magnitude * contactRadius;
 
         if (torque.magnitude > maxTorque) torque = torque.normalized * maxTorque;
 
         positionBody.AddTorque(torque, ForceMode.Force);
+
+        // Spinning at the visible rate rather than the contact rate leaves the assembly
+        // short of its target speed, and friction actively drags it back for under-spinning.
+        // Making up the difference directly is what lets the two be decoupled at all.
+        if (steering && visualRadius > contactRadius * 1.01f)
+            ApplySlipAssist(desiredDir);
+
+        if (matchSpinToTravel) MatchSpinToTravel(visualRadius);
+    }
+
+    /// <summary>
+    /// Sets the spin to exactly what the current travel implies at the visible radius.
+    ///
+    /// Torque alone is not enough here: it steers toward the target while contact friction
+    /// pulls toward v / contactRadius, and since both are bounded by the same traction the
+    /// ball settles between the two - always faster than asked. Setting it outright is the
+    /// only way to guarantee the rate, and the ball is featureless enough that nothing
+    /// reveals the contact is slipping.
+    ///
+    /// Derived from ACTUAL travel rather than the target, so coasting, ramps and being
+    /// shoved all still read correctly.
+    /// </summary>
+    private void MatchSpinToTravel(float visualRadius)
+    {
+        Vector3 velocity = positionBody.linearVelocity;
+        Vector3 horizontal = new Vector3(velocity.x, 0f, velocity.z);
+
+        float speed = horizontal.magnitude;
+        if (speed < 0.01f) return;
+
+        Vector3 axis = Vector3.Cross(Vector3.up, horizontal / speed);
+        positionBody.angularVelocity = axis * (speed / visualRadius);
+    }
+
+    /// <summary>
+    /// Pushes travel toward the target speed while the contact is deliberately slipping.
+    ///
+    /// Only needed because the spin is driven at the visible radius rather than the contact
+    /// radius. Applied as acceleration and clamped to the target, so it tops the assembly
+    /// up rather than overriding the solver - momentum, ramps and knocks all still come
+    /// from physics.
+    /// </summary>
+    private void ApplySlipAssist(Vector3 desiredDir)
+    {
+        Vector3 velocity = positionBody.linearVelocity;
+        Vector3 horizontal = new Vector3(velocity.x, 0f, velocity.z);
+
+        float along = Vector3.Dot(horizontal, desiredDir);
+        float shortfall = moveSpeed - along;
+        if (shortfall <= 0f) return;
+
+        float push = Mathf.Min(slipAssist, shortfall / Time.fixedDeltaTime);
+        positionBody.AddForce(desiredDir * push, ForceMode.Acceleration);
     }
 
     /// <summary>

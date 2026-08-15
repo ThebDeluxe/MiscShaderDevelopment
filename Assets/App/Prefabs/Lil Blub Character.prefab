@@ -222,8 +222,10 @@ MonoBehaviour:
   restAngularThreshold: 1
   restLinearThreshold: 1
   tractionLimit: 2.75
+  spinRadius: 0.7
+  slipAssist: 100
   airControl: 30
-  airSpeedCap: 1
+  airSpeedCap: 0.9
   steeringCamera: {fileID: 0}
   moveSpeed: 12
   minJumpHeight: 1

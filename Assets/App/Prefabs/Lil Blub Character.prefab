@@ -52,10 +52,23 @@ MonoBehaviour:
   rollingObject: {fileID: 6625386134798469017}
   ownContactSource: {fileID: 8682507769724385475}
   controller: {fileID: 2975038467675803792}
+  squash: {fileID: 0}
   blobMask:
     serializedVersion: 2
     m_Bits: 128
   pickupPadding: 0.05
+  pickupRadiusBlend: 0.5
+  innerRadius: 0.4
+  aimCamera: {fileID: 0}
+  aimAtCursor: 0
+  maxAimDistance: 100
+  aimMask:
+    serializedVersion: 2
+    m_Bits: 4294967295
+  throwSpeed: 14
+  throwArc: 2
+  spinDuration: 0.12
+  pickupLockSeconds: 0.7
   drawGizmos: 1
 --- !u!114 &4807807607735546416
 MonoBehaviour:
@@ -103,6 +116,8 @@ MonoBehaviour:
   mergeAngle: 25
   maxSources: 3
   minSink: 0.005
+  owner: {fileID: 0}
+  flatSiblingInterfaces: 0
   clampToEdges: 1
   edgeProbeSteps: 4
   edgeProbeTolerance: 0.06
@@ -128,7 +143,7 @@ Rigidbody:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 2782824578610637868}
   serializedVersion: 5
-  m_Mass: 5
+  m_Mass: 1
   m_LinearDamping: 0
   m_AngularDamping: 0.05
   m_CenterOfMass: {x: 0, y: 0, z: 0}
@@ -161,7 +176,7 @@ GameObject:
   - component: {fileID: 8160045513406346318}
   - component: {fileID: 8508303469249223072}
   m_Layer: 0
-  m_Name: Lil Dude Character
+  m_Name: Lil Blub Character
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -197,14 +212,20 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::BallCharacterController
   positionBody: {fileID: 710889707551558549}
   rollingObject: {fileID: 6625386134798469017}
-  horizontalFollowers: []
-  ballRadius: 0.7
   innerRadius: 0.4
   outerRadius: 0.7
   manageColliders: 1
+  innerMaterial: {fileID: 13400000, guid: 103a7413afe344d489070d47d268c84d, type: 2}
+  outerMaterial: {fileID: 0}
+  rollTorque: 5
+  brakeTorque: 1
+  restAngularThreshold: 1
+  restLinearThreshold: 1
+  tractionLimit: 2.75
+  airControl: 30
+  airSpeedCap: 1
   steeringCamera: {fileID: 0}
-  moveSpeed: 6
-  acceleration: 40
+  moveSpeed: 12
   minJumpHeight: 1
   maxJumpHeight: 3.5
   minJumpDuration: 0.45

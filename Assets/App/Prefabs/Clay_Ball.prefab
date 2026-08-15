@@ -237,6 +237,7 @@ MonoBehaviour:
   mergeAngle: 25
   maxSources: 3
   minSink: 0.005
+  owner: {fileID: 0}
   flatSiblingInterfaces: 0
   clampToEdges: 1
   edgeProbeSteps: 4
@@ -262,7 +263,7 @@ SphereCollider:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 5890885620145057565}
-  m_Material: {fileID: 0}
+  m_Material: {fileID: 13400000, guid: 103a7413afe344d489070d47d268c84d, type: 2}
   m_IncludeLayers:
     serializedVersion: 2
     m_Bits: 0
@@ -274,7 +275,7 @@ SphereCollider:
   m_ProvidesContacts: 0
   m_Enabled: 1
   serializedVersion: 3
-  m_Radius: 0.15
+  m_Radius: 0.25
   m_Center: {x: 0, y: 0, z: 0}
 --- !u!54 &6700592281054027276
 Rigidbody:

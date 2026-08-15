@@ -436,6 +436,9 @@ public class DentManager : MonoBehaviour
             var s = allSources[i];
             if (s == null) continue;
 
+            // Sources spawned from another object's contacts are none of our business.
+            if (s.exclusiveOwner != null && s.exclusiveOwner != this) continue;
+
             if (filterSourcesByBounds)
             {
                 // The stamp reaches 'outer' sideways and 'depth' backwards from its face,

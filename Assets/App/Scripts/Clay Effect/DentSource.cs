@@ -138,6 +138,17 @@ public class DentSource : MonoBehaviour
              "0 makes this stamp's dents permanent regardless of the manager.")]
     [Range(0f, 5f)] public float decayMultiplier = 1f;
 
+    /// <summary>
+    /// When set, only this manager may use the source.
+    ///
+    /// Sources register into one scene-wide list and every manager picks up whatever falls
+    /// within its bounds, which is right for hand-placed stamps. It is wrong for a source
+    /// spawned from a specific object's contacts: a blob resting on the floor would
+    /// otherwise press that floor plane into any nearby character too, at a position that
+    /// has nothing to do with where that character is actually touching anything.
+    /// </summary>
+    [System.NonSerialized] public DentManager exclusiveOwner;
+
     /// <summary>Inner radius, guaranteed below outer (smoothstep inverts otherwise).
     /// Capsule has no flat face, so it is zero. Plane repurposes this slot as its second
     /// half extent, so it passes through untouched.</summary>

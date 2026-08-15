@@ -36,7 +36,7 @@ public class BlobMerger : MonoBehaviour
     public DentContactSource ownContactSource;
 
     [Tooltip("Controller told about the assembly's effective rolling radius.")]
-    public BallCharacterController controller;
+    public ClayCharacterController controller;
 
     [Tooltip("Deformation driver. Absorbed blobs are registered with it so the whole " +
              "assembly squashes together, about one shared pivot.")]
@@ -49,6 +49,18 @@ public class BlobMerger : MonoBehaviour
     [Tooltip("Extra slack on the touch test, so a blob is absorbed on contact rather than " +
              "needing to overlap.")]
     public float pickupPadding = 0.05f;
+
+    [Tooltip("Where a blob has to reach before it is absorbed, between the physical " +
+             "collider and the visible surface.\n\n" +
+             "0 = the inner collider. Blobs sit close to what the assembly actually rolls " +
+             "on, which keeps fast movement smooth, but they have to visibly overlap first.\n\n" +
+             "1 = the visible surface. Picks up on contact as it looks, but attached blobs " +
+             "stick out past the rolling surface and make it bumpy.\n\n" +
+             "0.5 is a reasonable middle.")]
+    [Range(0f, 1f)] public float pickupRadiusBlend = 0.5f;
+
+    [Tooltip("Physical radius, taken from the controller's inner collider when one is found.")]
+    public float innerRadius = 0.4f;
 
     [Header("Throwing")]
     [Tooltip("Camera used for aiming. Leave empty to use the main camera.")]
@@ -98,10 +110,16 @@ public class BlobMerger : MonoBehaviour
     {
         if (body == null) body = GetComponent<Rigidbody>();
         if (ownContactSource == null) ownContactSource = GetComponentInChildren<DentContactSource>();
-        if (controller == null) controller = GetComponent<BallCharacterController>();
+        if (controller == null) controller = GetComponent<ClayCharacterController>();
         if (squash == null) squash = GetComponentInChildren<SquashStretch>();
 
         EffectiveRadius = ownContactSource != null ? ownContactSource.visualRadius : 0.5f;
+
+        // Pick up the controller's real collision radius, so pickup lines up with what the
+        // assembly actually rolls on rather than with the visible surface. Read in Start,
+        // because the controller builds its colliders in Awake.
+        if (controller != null && controller.InnerCollider != null)
+            innerRadius = controller.InnerCollider.radius;
 
         throwAction = new InputAction("Throw", InputActionType.Button);
         throwAction.AddBinding("<Mouse>/leftButton");
@@ -148,10 +166,18 @@ public class BlobMerger : MonoBehaviour
         }
     }
 
+    /// <summary>Radius the assembly presents for pickup, between physical and visible.</summary>
+    float OwnPickupRadius =>
+        Mathf.Lerp(innerRadius,
+                   ownContactSource != null ? ownContactSource.visualRadius : 0.5f,
+                   pickupRadiusBlend);
+
     bool IsTouching(ClayBlob blob)
     {
+        // Blobs already absorbed still present their visible size - they are what the new
+        // blob physically runs into.
         float nearest = Vector3.Distance(blob.transform.position, OwnCentre())
-                        - blob.visualRadius - ownContactSource.visualRadius;
+                        - blob.visualRadius - OwnPickupRadius;
 
         for (int i = 0; i < merged.Count; i++)
         {
@@ -180,33 +206,29 @@ public class BlobMerger : MonoBehaviour
     /// <summary>
     /// Throws one of the absorbed blobs at whatever is being aimed at.
     ///
-    /// The assembly turns first so the chosen blob ends up on the side it is being thrown
-    /// toward. Without that, a blob on the far side would launch straight through the rest
-    /// of the lump - and since its collider only leaves the shared Rigidbody at the moment
-    /// of release, it would collide with everything on the way out.
+    /// The blob already nearest the launch direction is chosen, so it leads the throw
+    /// rather than having to pass through the rest of the lump - its collider only leaves
+    /// the shared Rigidbody at the moment of release, so it would collide with everything
+    /// on the way out.
     /// </summary>
     public bool TryThrow()
     {
         if (throwing || merged.Count == 0 || rollingObject == null) return false;
 
-        ClayBlob blob = merged[Random.Range(0, merged.Count)];
-
-        StartCoroutine(ThrowRoutine(blob));
+        StartCoroutine(ThrowRoutine());
         return true;
     }
 
-    IEnumerator ThrowRoutine(ClayBlob blob)
+    IEnumerator ThrowRoutine()
     {
         throwing = true;
 
         Vector3 aimPoint = ResolveAimPoint();
 
-        // Flattened: rolling the assembly over to point a blob upward would look wrong, and
-        // the arc is added separately anyway.
         Vector3 launchDir = Vector3.ProjectOnPlane(aimPoint - AssemblyCentre(), Vector3.up);
 
-        // Last resort if the aim still collapses - the camera's own facing is always a
-        // sensible direction, and beats normalising something near zero.
+        // Last resort if the aim collapses - the camera's own facing is always a sensible
+        // direction, and beats normalising something near zero.
         if (launchDir.sqrMagnitude < 1e-4f)
         {
             Camera cam = aimCamera != null ? aimCamera : Camera.main;
@@ -218,40 +240,41 @@ public class BlobMerger : MonoBehaviour
         if (launchDir.sqrMagnitude < 1e-6f) launchDir = Vector3.forward;
         launchDir.Normalize();
 
-        yield return SpinToward(blob, launchDir);
+        // Choosing the blob already facing the throw replaces turning the assembly to suit,
+        // and keeps the launch clear of the rest of the lump either way.
+        ClayBlob blob = PickBlobFacing(launchDir);
+
+        if (spinDuration > 0f) yield return new WaitForSeconds(spinDuration);
 
         if (blob != null) Release(blob, launchDir * throwSpeed + Vector3.up * throwArc);
 
         throwing = false;
     }
 
-    /// <summary>Turns the assembly about its own centre until the blob leads the throw.</summary>
-    IEnumerator SpinToward(ClayBlob blob, Vector3 launchDir)
+    /// <summary>
+    /// Picks whichever absorbed blob already sits nearest the launch direction.
+    ///
+    /// Cheaper than turning the assembly to suit, and it does not fight the solver: under
+    /// physics rolling the body owns its own rotation, so forcing it mid-throw would be
+    /// overwritten the moment the step runs.
+    /// </summary>
+    ClayBlob PickBlobFacing(Vector3 launchDir)
     {
-        if (blob == null || spinDuration <= 0f) yield break;
-
         Vector3 pivot = AssemblyCentre();
 
-        Vector3 current = Vector3.ProjectOnPlane(blob.transform.position - pivot, Vector3.up);
-        if (current.sqrMagnitude < 1e-6f) yield break;   // blob sits on the axis, nothing to turn
+        ClayBlob best = merged[0];
+        float bestDot = float.MinValue;
 
-        Quaternion turn = Quaternion.FromToRotation(current.normalized, launchDir);
-        Quaternion start = rollingObject.rotation;
-        Quaternion end = turn * start;
-
-        float elapsed = 0f;
-        while (elapsed < spinDuration)
+        for (int i = 0; i < merged.Count; i++)
         {
-            elapsed += Time.deltaTime;
-            float t = Mathf.Clamp01(elapsed / spinDuration);
+            Vector3 offset = Vector3.ProjectOnPlane(merged[i].transform.position - pivot, Vector3.up);
+            if (offset.sqrMagnitude < 1e-6f) continue;
 
-            // Rotated about the assembly centre, not the transform origin, so the lump
-            // spins in place instead of orbiting.
-            rollingObject.rotation = Quaternion.Slerp(start, end, t);
-            yield return null;
+            float dot = Vector3.Dot(offset.normalized, launchDir);
+            if (dot > bestDot) { bestDot = dot; best = merged[i]; }
         }
 
-        rollingObject.rotation = end;
+        return best;
     }
 
     /// <summary>

@@ -69,11 +69,16 @@ public class DentContactSource : MonoBehaviour
              "in and out.")]
     public float minSink = 0.005f;
 
+    [Tooltip("Manager these contacts belong to. Sources spawned here are marked as its " +
+             "property, so a blob's floor contact cannot press a plane into a nearby " +
+             "character. Found on this object or its parents if left empty.")]
+    public DentManager owner;
+
     [Tooltip("How merged siblings interface with each other.\n\n" +
-             "OFF treats a sibling like any other rounded collider, so the pair press " +
-             "spherical dents into each other.\n\n" +
+             "OFF treats a sibling as the rounded blob it is, so the pair press curved " +
+             "dents into each other.\n\n" +
              "ON gives them a flat disc at the radical plane between their centres, which " +
-             "is what two clay balls squashed together would actually share.")]
+             "is what two clay balls squashed hard together would share.")]
     public bool flatSiblingInterfaces = false;
 
     [Header("Edge Clamping")]
@@ -158,18 +163,19 @@ public class DentContactSource : MonoBehaviour
     readonly HashSet<Collider> siblingColliders = new HashSet<Collider>();
 
     /// <summary>
-    /// Tells this source which other blobs share its assembly. Their colliders are then
-    /// skipped by the ordinary probe and given flat interfaces instead.
+    /// Tells this source which other blobs share its assembly.
+    ///
+    /// Siblings are always handled here rather than by the ordinary overlap pass, for two
+    /// reasons. Merging parents a blob under the character, so IsChildOf excludes it from
+    /// the character's probe entirely. And the physical colliders are deliberately smaller
+    /// than the visible meshes - the character's is 0.4 against a 0.7 mesh - so a blob
+    /// resting on the character's visible surface is nowhere near its collider and would
+    /// register no contact at all. Working from the visual radii fixes both.
     /// </summary>
     public void SetSiblings(List<DentContactSource> all, DentContactSource self)
     {
         siblings.Clear();
         siblingColliders.Clear();
-
-        // Without flat interfaces there is nothing special to do: leaving the list empty
-        // lets the ordinary overlap pass pick each sibling up as the rounded collider it
-        // actually is.
-        if (!flatSiblingInterfaces) return;
 
         for (int i = 0; i < all.Count; i++)
         {
@@ -246,6 +252,8 @@ public class DentContactSource : MonoBehaviour
     void LateUpdate()
     {
         if (paused) return;
+
+        if (owner == null) owner = GetComponentInParent<DentManager>();
 
         EnsureDirections();
 
@@ -667,10 +675,12 @@ public class DentContactSource : MonoBehaviour
     /// <summary>
     /// Interface with a blob merged into the same assembly.
     ///
-    /// Two overlapping spheres meet at their RADICAL PLANE - flat, perpendicular to the
-    /// line joining their centres, positioned where the two surfaces would intersect. That
-    /// is what clay balls pressed together actually share, whereas treating a sibling as
-    /// an ordinary curved surface would push a spherical dent into it instead.
+    /// Both are spheres of known visual radius, so this is solved rather than sampled.
+    /// Curved by default - each presses a rounded dent into the other, as one lump of clay
+    /// resting against another does.
+    ///
+    /// With flat interfaces on, they instead share their RADICAL PLANE: flat, perpendicular
+    /// to the line joining their centres, positioned where the two surfaces intersect.
     ///
     ///     x = (d^2 + ra^2 - rb^2) / 2d      distance from our centre to the plane
     ///     r = sqrt(ra^2 - x^2)              radius of the contact disc
@@ -688,6 +698,14 @@ public class DentContactSource : MonoBehaviour
         if (d >= ra + rb) return;   // not touching yet
 
         Vector3 axis = delta / d;   // from the sibling's surface into us
+
+        if (!flatSiblingInterfaces)
+        {
+            // Treat the sibling as the sphere it is. AddCurvedContact does the rest, so
+            // this shares every downstream behaviour with a real SphereCollider contact.
+            AddCurvedContact(otherCentre, rb, centre, mergeDot);
+            return;
+        }
 
         float x = (d * d + ra * ra - rb * rb) / (2f * d);
 
@@ -1026,6 +1044,10 @@ public class DentContactSource : MonoBehaviour
 
             var src = go.AddComponent<DentSource>();
             src.shape = DentShape.Plane;
+
+            // Marked as ours, so no other manager picks it up and presses our contacts
+            // into their mesh at a position that means nothing there.
+            src.exclusiveOwner = owner;
 
             go.SetActive(false);
             pool.Add(src);

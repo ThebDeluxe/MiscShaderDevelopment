@@ -1,51 +1,58 @@
-using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
 /// <summary>
-/// A basic rolling-ball character controller for Unity's new Input System, split
-/// across two referenced objects:
+/// A rolling-ball character controller for Unity's new Input System, split across two
+/// referenced objects:
 ///
-///   - Position Body : a Rigidbody that ONLY moves position (walking & jumping).
-///                     Its rotation is frozen so physics never spins it.
-///   - Rolling Object : a separate Transform that receives the visual rolling
-///                       rotation. Make this a child of the Position Body so it
-///                       follows the position automatically.
+///   - Position Body  : the Rigidbody. Physics owns both its position and its rotation, so
+///                      torque genuinely rolls it and attached colliders are swept rather
+///                      than teleported.
+///   - Rolling Object : a child holding the visuals. It inherits the body's rotation, so
+///                      nothing here needs to drive it.
 ///
 /// Controls:
-///   - WASD / Left Stick : move in world axial directions
+///   - WASD / Left Stick : move relative to the camera
 ///   - Space (hold)      : charge a jump; the longer the hold, the bigger the jump
 ///
-/// Rolling matches travel exactly: angularSpeed = linearSpeed / radius.
-/// Set Ball Radius to match the visible ball's radius.
+/// Rolling is driven by torque against friction, so the assembly's real mass and inertia
+/// decide how it accelerates - a lump grown from absorbed blobs feels heavier for free.
 /// </summary>
-public class BallCharacterController : MonoBehaviour
+public class ClayCharacterController : MonoBehaviour
 {
     [Header("References")]
-    [Tooltip("Rigidbody that only moves position (walking & jumping). Rotation is frozen.")]
+    [Tooltip("The Rigidbody. Physics owns its rotation, so torque rolls it directly.")]
     [SerializeField] private Rigidbody positionBody;
-    [Tooltip("Object that visually rolls. Best as a child of the Position Body so it follows position.")]
+    [Tooltip("Child holding the visuals. Inherits the body's rotation automatically.")]
     [SerializeField] private Transform rollingObject;
-    [Tooltip("Objects that follow the body's position (including ground height) but ignore the upward jump motion. Each keeps its starting height offset.")]
-    [SerializeField] private List<GameObject> horizontalFollowers = new List<GameObject>();
-
-    [Header("Ball")]
-    [Tooltip("Radius of the ball, in metres. Used to convert movement speed into the correct rolling rotation.")]
-    [SerializeField] private float ballRadius = 0.5f;
 
     [Header("Colliders")]
-    [Tooltip("Physical collision radius. Deliberately SMALLER than the visible mesh, so the " +
-             "character can visually sink into surfaces by the difference - which is what " +
-             "gives the dent effect something to flatten.")]
+    [Tooltip("Physical collision radius, and the radius the ball actually rolls on.\n\n" +
+             "Deliberately SMALLER than the visible mesh, so the character can sink into " +
+             "surfaces by the difference - which is what gives the dent effect something to " +
+             "flatten. The gap also decides how fast it appears to spin: contact at this " +
+             "radius means friction forces v = omega * r, so a small value spins visibly " +
+             "faster than the visible size suggests.")]
     [SerializeField] private float innerRadius = 0.4f;
 
-    [Tooltip("Approximate radius of the visible mesh. Used as a trigger for clicking and " +
-             "other interaction, and as the detection sphere for contact-driven dents.")]
+    [Tooltip("Radius of the visible mesh. Used as an interaction trigger and as the " +
+             "detection sphere for contact-driven dents.")]
     [SerializeField] private float outerRadius = 0.7f;
 
     [Tooltip("Build and maintain the two sphere colliders on the position body. Turn off if " +
              "you would rather author them by hand.")]
     [SerializeField] private bool manageColliders = true;
+
+    [Tooltip("Physics material for the inner collider.\n\n" +
+             "Physics rolling turns torque into travel THROUGH FRICTION, so this is not " +
+             "optional there - on a slippery material the assembly just spins on the spot. " +
+             "The colliders are built at runtime, which is why this is set here rather than " +
+             "on a collider in the scene.")]
+    [SerializeField] private PhysicsMaterial innerMaterial;
+
+    [Tooltip("Physics material for the outer trigger. Rarely needed, since triggers do not " +
+             "resolve contacts.")]
+    [SerializeField] private PhysicsMaterial outerMaterial;
 
     private SphereCollider innerCollider;
     private SphereCollider outerCollider;
@@ -71,14 +78,50 @@ public class BallCharacterController : MonoBehaviour
     private readonly RaycastHit[] groundHits = new RaycastHit[8];
 
     [Header("Movement")]
+    [Tooltip("How hard the assembly is driven toward its target roll speed.\n\n" +
+             "Applied as real torque, so a heavier assembly genuinely accelerates more " +
+             "slowly. Note this is usually NOT the limiting value - see Traction Limit.")]
+    [SerializeField] private float rollTorque = 60f;
+
+    [Tooltip("How hard it brakes when there is no input. 0 coasts until friction stops it.")]
+    [SerializeField] private float brakeTorque = 60f;
+
+    [Tooltip("Below this spin, with no input, the assembly is snapped to a stop.\n\n" +
+             "Braking torque is proportional to how fast it is spinning, so it decays " +
+             "toward zero without ever arriving. What is left is far too slow to read as " +
+             "movement but perfectly visible as a slow turn on the spot.")]
+    [SerializeField] private float restAngularThreshold = 0.35f;
+
+    [Tooltip("Matching threshold for drift, in metres per second.")]
+    [SerializeField] private float restLinearThreshold = 0.15f;
+
+    [Tooltip("THE responsiveness dial. Grip available for rolling, as a multiple of real " +
+             "friction.\n\n" +
+             "Torque is capped at what the contact patch could transmit, so this - not Roll " +
+             "Torque - is almost always what limits acceleration. A ball driven purely by " +
+             "friction cannot accelerate faster than mu * g, about 9.8 m/s at friction 1, " +
+             "which is why realistic values feel heavy.\n\n" +
+             "1 is physically honest. Raise it for arcade grip: 4 to 6 feels light and " +
+             "responsive without the ball visibly slipping.")]
+    [SerializeField] private float tractionLimit = 5f;
+
+    [Tooltip("Acceleration available while airborne, where there is no friction to roll " +
+             "against and torque would do nothing.")]
+    [SerializeField] private float airControl = 12f;
+
+    [Tooltip("Fastest horizontal speed air control alone may reach, as a multiple of Move " +
+             "Speed.\n\n" +
+             "Without a cap every airborne moment adds free acceleration, so repeatedly " +
+             "jumping builds speed indefinitely. Above the cap steering still works, it " +
+             "just cannot add any more speed.")]
+    [SerializeField] private float airSpeedCap = 1.05f;
+
     [Tooltip("Camera that movement is relative to. W goes away from it. Leave empty to " +
              "find one automatically, or to fall back to world axes if there is none.")]
     [SerializeField] private ThirdPersonCamera steeringCamera;
 
     [Tooltip("Maximum move speed in metres per second.")]
     [SerializeField] private float moveSpeed = 6f;
-    [Tooltip("How quickly the ball accelerates toward the target velocity.")]
-    [SerializeField] private float acceleration = 40f;
 
     [Header("Jump")]
     [Tooltip("Peak height of the shortest (tap) jump, in metres.")]
@@ -142,11 +185,6 @@ public class BallCharacterController : MonoBehaviour
     private float jumpDuration;
     private float jumpPeak;
 
-    // Follower tracking: the body's last grounded height (so jumps are ignored)
-    // and each follower's starting height offset from that ground level.
-    private float lastGroundedY;
-    private float[] followerYOffsets;
-
     // Landing detection. The velocity is sampled at the END of each physics step, because
     // by the time the solver reports us grounded it has already cancelled the fall.
     private bool wasGrounded;
@@ -155,10 +193,12 @@ public class BallCharacterController : MonoBehaviour
     private void Awake()
     {
         if (positionBody == null)
-            Debug.LogError("BallCharacterController: Position Body is not assigned.", this);
+            Debug.LogError("ClayCharacterController: Position Body is not assigned.", this);
         else
         {
-            positionBody.freezeRotation = true; // this body only moves position
+            // Physics owns rotation, so torque genuinely rolls the body and attached
+            // colliders are swept rather than teleported.
+            positionBody.freezeRotation = false;
 
             // Physics steps at a fixed rate while rendering does not, so without
             // interpolation the transform only moves on physics ticks and the renderer
@@ -169,11 +209,13 @@ public class BallCharacterController : MonoBehaviour
         }
 
         if (rollingObject == null)
-            Debug.LogError("BallCharacterController: Rolling Object is not assigned.", this);
+            Debug.LogError("ClayCharacterController: Rolling Object is not assigned.", this);
 
         if (manageColliders) SetUpColliders();
 
-        rollingRadius = ballRadius;
+        // The radius that touches the ground, not the visible one. Friction ties travel to
+        // spin through the contact radius, so the target spin has to be derived from it.
+        rollingRadius = innerRadius;
 
         if (steeringCamera == null) steeringCamera = FindFirstObjectByType<ThirdPersonCamera>();
         if (squash == null) squash = GetComponentInChildren<SquashStretch>();
@@ -224,13 +266,22 @@ public class BallCharacterController : MonoBehaviour
         innerCollider = FindOrCreate(bodyTransform, "Collider (Inner)");
         innerCollider.radius = innerRadius;
         innerCollider.isTrigger = false;
+        if (innerMaterial != null) innerCollider.sharedMaterial = innerMaterial;
 
         outerCollider = FindOrCreate(bodyTransform, "Collider (Outer)");
         outerCollider.radius = outerRadius;
         outerCollider.isTrigger = true;   // interaction and detection only, never blocks
+        if (outerMaterial != null) outerCollider.sharedMaterial = outerMaterial;
+
+        if (innerMaterial == null)
+        {
+            Debug.LogWarning("ClayCharacterController: no Inner Material is assigned. Torque " +
+                             "only becomes travel through friction, so with Unity's default " +
+                             "material the assembly may spin without moving.", this);
+        }
 
         if (outerRadius < innerRadius)
-            Debug.LogWarning("BallCharacterController: Outer Radius is smaller than Inner " +
+            Debug.LogWarning("ClayCharacterController: Outer Radius is smaller than Inner " +
                              "Radius, so the character cannot sink into anything.", this);
     }
 
@@ -256,6 +307,12 @@ public class BallCharacterController : MonoBehaviour
         return collider;
     }
 
+    /// <summary>The physical collider the assembly rolls on. Null until Awake has run.</summary>
+    public SphereCollider InnerCollider => innerCollider;
+
+    /// <summary>The interaction trigger around the visible surface. Null until Awake has run.</summary>
+    public SphereCollider OuterCollider => outerCollider;
+
     private void OnValidate()
     {
         innerRadius = Mathf.Max(0.01f, innerRadius);
@@ -263,22 +320,6 @@ public class BallCharacterController : MonoBehaviour
 
         if (innerCollider != null) innerCollider.radius = innerRadius;
         if (outerCollider != null) outerCollider.radius = outerRadius;
-    }
-
-    private void Start()
-    {
-        // Capture the ground reference height and each follower's offset from it,
-        // so followers keep their relative placement while tracking the ground.
-        lastGroundedY = positionBody != null ? positionBody.position.y : 0f;
-
-        followerYOffsets = new float[horizontalFollowers.Count];
-        for (int i = 0; i < horizontalFollowers.Count; i++)
-        {
-            GameObject follower = horizontalFollowers[i];
-            followerYOffsets[i] = follower != null
-                ? follower.transform.position.y - lastGroundedY
-                : 0f;
-        }
     }
 
     private void OnEnable()
@@ -335,14 +376,8 @@ public class BallCharacterController : MonoBehaviour
         CheckGrounded();
         DetectLanding();
 
-        // Remember the body's height whenever it's on the ground, so followers can
-        // track terrain height without being carried upward by a jump.
-        if (isGrounded)
-            lastGroundedY = positionBody.position.y;
-
         Move();
         UpdateJumpArc();
-        Roll();
 
         // Sampled last so it holds the speed we were travelling at during this step, before
         // a collision next step wipes it.
@@ -374,26 +409,6 @@ public class BallCharacterController : MonoBehaviour
                           Mathf.Lerp(minWobbleDuration, maxWobbleDuration, severity));
     }
 
-    private void LateUpdate()
-    {
-        if (positionBody == null) return;
-
-        // Followers track the body's horizontal position and its grounded height,
-        // so they stay on top of terrain, but the jump (upward Y) is ignored.
-        Vector3 bodyPos = positionBody.position;
-        for (int i = 0; i < horizontalFollowers.Count; i++)
-        {
-            GameObject follower = horizontalFollowers[i];
-            if (follower == null) continue;
-
-            float yOffset = (followerYOffsets != null && i < followerYOffsets.Length)
-                ? followerYOffsets[i]
-                : 0f;
-
-            follower.transform.position = new Vector3(bodyPos.x, lastGroundedY + yOffset, bodyPos.z);
-        }
-    }
-
     private void Move()
     {
         // Steer relative to the camera, so W always means "away from the viewer".
@@ -409,14 +424,114 @@ public class BallCharacterController : MonoBehaviour
         Vector3 desiredDir = right * moveInput.x + forward * moveInput.y;
         if (desiredDir.sqrMagnitude > 1f) desiredDir.Normalize();
 
-        Vector3 targetVelocity = desiredDir * moveSpeed;
+        MovePhysical(desiredDir);
+    }
 
-        // Only steer the horizontal velocity; leave vertical (gravity/jump) alone.
+    /// <summary>
+    /// Rolls the body with torque and lets friction turn that into travel.
+    ///
+    /// Driven toward a TARGET ANGULAR VELOCITY rather than pushed with constant torque:
+    /// the target is whatever spin would carry the assembly at moveSpeed, so it accelerates
+    /// hard when far from that and eases off as it arrives. No separate speed cap is
+    /// needed, and it cannot over-drive into a wheelspin.
+    ///
+    /// Torque is applied in Force mode, so the assembly's real inertia decides how quickly
+    /// it responds. That is what makes a growing lump feel heavier without any of it being
+    /// scripted - and it is why Acceleration mode, which ignores inertia entirely, felt
+    /// both sluggish and unchanging as blobs were absorbed.
+    /// </summary>
+    private void MovePhysical(Vector3 desiredDir)
+    {
+        bool steering = desiredDir.sqrMagnitude > 1e-4f;
+
+        if (!isGrounded)
+        {
+            ApplyAirControl(desiredDir);
+            return;
+        }
+
+        // The radius that actually touches the ground. Friction ties travel to spin through
+        // THIS, not the visible size - so using anything else here silently caps the top
+        // speed at the ratio between the two.
+        float radius = Mathf.Max(rollingRadius, 0.01f);
+
+        // The spin that would carry the assembly at moveSpeed: omega = v / r, about the
+        // axis across the direction of travel.
+        Vector3 targetAngular = steering
+            ? Vector3.Cross(Vector3.up, desiredDir) * (moveSpeed / radius)
+            : Vector3.zero;
+
+        if (!steering && TryComeToRest()) return;
+
+        Vector3 error = targetAngular - positionBody.angularVelocity;
+
+        float strength = steering ? rollTorque : brakeTorque;
+        if (strength <= 0f) return;
+
+        Vector3 torque = error * strength;
+
+        // Cap at what friction can actually transmit. Beyond mu * m * g * r the contact
+        // patch slips, which reads as spinning on the spot rather than accelerating.
+        float maxTorque = tractionLimit * positionBody.mass
+                          * Physics.gravity.magnitude * radius;
+
+        if (torque.magnitude > maxTorque) torque = torque.normalized * maxTorque;
+
+        positionBody.AddTorque(torque, ForceMode.Force);
+    }
+
+    /// <summary>
+    /// Steers while airborne, where there is no friction to roll against.
+    ///
+    /// Capped, because otherwise every airborne moment is free acceleration with none of
+    /// the traction limit that holds ground speed in check - so repeatedly jumping builds
+    /// speed without limit. Past the cap the push is projected onto the turn, which keeps
+    /// air steering responsive without letting it add speed.
+    /// </summary>
+    private void ApplyAirControl(Vector3 desiredDir)
+    {
+        if (desiredDir.sqrMagnitude < 1e-4f) return;
+
         Vector3 velocity = positionBody.linearVelocity;
         Vector3 horizontal = new Vector3(velocity.x, 0f, velocity.z);
-        horizontal = Vector3.MoveTowards(horizontal, targetVelocity, acceleration * Time.fixedDeltaTime);
 
-        positionBody.linearVelocity = new Vector3(horizontal.x, velocity.y, horizontal.z);
+        float cap = moveSpeed * Mathf.Max(airSpeedCap, 0.1f);
+        Vector3 push = desiredDir;
+
+        if (horizontal.magnitude >= cap)
+        {
+            // Strip the component that would speed us up, leaving only the part that turns.
+            Vector3 along = Vector3.Project(push, horizontal.normalized);
+            if (Vector3.Dot(along, horizontal) > 0f) push -= along;
+
+            if (push.sqrMagnitude < 1e-6f) return;
+        }
+
+        positionBody.AddForce(push * airControl, ForceMode.Acceleration);
+    }
+
+    /// <summary>
+    /// Snaps the assembly to a full stop once it is nearly there.
+    ///
+    /// A proportional brake weakens as it succeeds, so it approaches zero asymptotically
+    /// and leaves a slow residual turn that never resolves. Below a threshold it is
+    /// cheaper and cleaner to just stop, and lets the body sleep rather than being woken
+    /// by torque every step.
+    /// </summary>
+    private bool TryComeToRest()
+    {
+        Vector3 velocity = positionBody.linearVelocity;
+        Vector3 horizontal = new Vector3(velocity.x, 0f, velocity.z);
+
+        if (positionBody.angularVelocity.magnitude > restAngularThreshold) return false;
+        if (horizontal.magnitude > restLinearThreshold) return false;
+
+        positionBody.angularVelocity = Vector3.zero;
+
+        // Vertical is left alone, so gravity and any jump arc still apply.
+        positionBody.linearVelocity = new Vector3(0f, velocity.y, 0f);
+
+        return true;
     }
 
     /// <summary>
@@ -461,25 +576,6 @@ public class BallCharacterController : MonoBehaviour
     {
         isJumping = false;
         positionBody.useGravity = true;
-    }
-
-    private void Roll()
-    {
-        if (rollingObject == null || rollingRadius <= 0.0001f) return;
-
-        // Roll the visual object to match the body's horizontal travel:
-        //   angularSpeed (rad/s) = linearSpeed / radius
-        //   rotation axis        = up x moveDirection
-        //
-        // The radius comes from the ASSEMBLY rather than the original ball, so absorbing
-        // blobs makes the whole lump roll more slowly as it grows.
-        Vector3 horizontal = new Vector3(positionBody.linearVelocity.x, 0f, positionBody.linearVelocity.z);
-        float speed = horizontal.magnitude;
-        if (speed <= 0.001f) return;
-
-        Vector3 axis = Vector3.Cross(Vector3.up, horizontal.normalized);
-        float degrees = (speed / rollingRadius) * Mathf.Rad2Deg * Time.fixedDeltaTime;
-        rollingObject.Rotate(axis * degrees, Space.World);
     }
 
     private void CheckGrounded()

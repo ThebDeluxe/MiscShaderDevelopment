@@ -10,6 +10,9 @@
             "m_Id": "0b6b56b5fde84821b8698012d36f8925"
         },
         {
+            "m_Id": "4d3d5fa3169f41cb830cf7a42a0d024e"
+        },
+        {
             "m_Id": "4d87604d31aa47f993708a7418a78f0f"
         },
         {
@@ -200,6 +203,9 @@
         },
         {
             "m_Id": "8523906bdf034d7a90b9e3888f60cd77"
+        },
+        {
+            "m_Id": "95fbb530ebc04fe29d554cb4deea2d6d"
         }
     ],
     "m_GroupDatas": [
@@ -519,6 +525,20 @@
                     "m_Id": "e54790f1d78845c6b0725b96e0a9ac0e"
                 },
                 "m_SlotId": 1
+            }
+        },
+        {
+            "m_OutputSlot": {
+                "m_Node": {
+                    "m_Id": "95fbb530ebc04fe29d554cb4deea2d6d"
+                },
+                "m_SlotId": 0
+            },
+            "m_InputSlot": {
+                "m_Node": {
+                    "m_Id": "f84363b596fd407da8f22f8bcab0abaa"
+                },
+                "m_SlotId": 7
             }
         },
         {
@@ -1463,6 +1483,22 @@
 
 {
     "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.Vector1MaterialSlot",
+    "m_ObjectId": "25ad16639f294ebcbefb6fda8f4c3848",
+    "m_Id": 7,
+    "m_DisplayName": "Spread",
+    "m_SlotType": 0,
+    "m_Hidden": false,
+    "m_ShaderOutputName": "Spread",
+    "m_StageCapability": 3,
+    "m_Value": 0.0,
+    "m_DefaultValue": 0.0,
+    "m_Labels": [],
+    "m_LiteralMode": false
+}
+
+{
+    "m_SGVersion": 0,
     "m_Type": "UnityEditor.ShaderGraph.BlockNode",
     "m_ObjectId": "25e043473adb44a59edd270ea7445291",
     "m_Group": {
@@ -1901,13 +1937,16 @@
             "m_Id": "4d87604d31aa47f993708a7418a78f0f"
         },
         {
-            "m_Id": "af90213dc8854cc08851262cc9016d88"
-        },
-        {
             "m_Id": "900a60abb9f946fb8484e46a0f6d3c71"
         },
         {
             "m_Id": "d6c9660b1d3141a6a0b97eb1a2d50647"
+        },
+        {
+            "m_Id": "4d3d5fa3169f41cb830cf7a42a0d024e"
+        },
+        {
+            "m_Id": "af90213dc8854cc08851262cc9016d88"
         }
     ]
 }
@@ -2030,6 +2069,50 @@
         "z": 0.0
     },
     "m_Labels": []
+}
+
+{
+    "m_SGVersion": 1,
+    "m_Type": "UnityEditor.ShaderGraph.Internal.Vector1ShaderProperty",
+    "m_ObjectId": "4d3d5fa3169f41cb830cf7a42a0d024e",
+    "m_Guid": {
+        "m_GuidSerialized": "39c8923d-1475-4c05-9bbb-9ec4344d379b"
+    },
+    "promotedFromAssetID": "",
+    "promotedFromCategoryName": "",
+    "promotedOrdering": -1,
+    "m_Name": "_ShapeSpread",
+    "m_DefaultRefNameVersion": 1,
+    "m_RefNameGeneratedByDisplayName": "_ShapeSpread",
+    "m_DefaultReferenceName": "_ShapeSpread",
+    "m_OverrideReferenceName": "",
+    "m_GeneratePropertyBlock": false,
+    "m_UseCustomSlotLabel": false,
+    "m_CustomSlotLabel": "",
+    "m_DismissedVersion": 0,
+    "m_Precision": 0,
+    "overrideHLSLDeclaration": true,
+    "hlslDeclarationOverride": 2,
+    "m_Hidden": false,
+    "m_PerRendererData": false,
+    "m_customAttributes": [],
+    "m_Value": 0.0,
+    "m_FloatType": 0,
+    "m_LiteralFloatMode": false,
+    "m_RangeValues": {
+        "x": 0.0,
+        "y": 1.0
+    },
+    "m_SliderType": 0,
+    "m_SliderPower": 3.0,
+    "m_EnumType": 0,
+    "m_CSharpEnumString": "",
+    "m_EnumNames": [
+        "Default"
+    ],
+    "m_EnumValues": [
+        0
+    ]
 }
 
 {
@@ -2750,7 +2833,7 @@
     "m_ObjectId": "81987b0287104d9db9b28ef06fd61de5",
     "m_Title": "Vertex Dent",
     "m_Position": {
-        "x": -2635.0,
+        "x": -2635.000244140625,
         "y": -1277.0
     }
 }
@@ -3154,6 +3237,42 @@
 
 {
     "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.PropertyNode",
+    "m_ObjectId": "95fbb530ebc04fe29d554cb4deea2d6d",
+    "m_Group": {
+        "m_Id": ""
+    },
+    "m_Name": "Property",
+    "m_DrawState": {
+        "m_Expanded": true,
+        "m_Position": {
+            "serializedVersion": "2",
+            "x": -1416.0001220703125,
+            "y": -833.0000610351563,
+            "width": 140.0,
+            "height": 34.0
+        }
+    },
+    "m_Slots": [
+        {
+            "m_Id": "c08433c51e934c539acde779decf20a2"
+        }
+    ],
+    "synonyms": [],
+    "m_Precision": 0,
+    "m_PreviewExpanded": true,
+    "m_DismissedVersion": 0,
+    "m_PreviewMode": 0,
+    "m_CustomColors": {
+        "m_SerializableColors": []
+    },
+    "m_Property": {
+        "m_Id": "4d3d5fa3169f41cb830cf7a42a0d024e"
+    }
+}
+
+{
+    "m_SGVersion": 0,
     "m_Type": "UnityEditor.ShaderGraph.Vector1MaterialSlot",
     "m_ObjectId": "9abb03bcb9ba40edbd9b1ea1f6e517fc",
     "m_Id": 2,
@@ -3387,10 +3506,10 @@
         "m_Expanded": true,
         "m_Position": {
             "serializedVersion": "2",
-            "x": -1415.9998779296875,
-            "y": -850.0,
-            "width": 143.9998779296875,
-            "height": 34.0
+            "x": -1410.0001220703125,
+            "y": -776.0000610351563,
+            "width": 144.0,
+            "height": 33.99993896484375
         }
     },
     "m_Slots": [
@@ -3892,6 +4011,22 @@
         "z": 0.0,
         "w": 0.0
     },
+    "m_LiteralMode": false
+}
+
+{
+    "m_SGVersion": 0,
+    "m_Type": "UnityEditor.ShaderGraph.Vector1MaterialSlot",
+    "m_ObjectId": "c08433c51e934c539acde779decf20a2",
+    "m_Id": 0,
+    "m_DisplayName": "_ShapeSpread",
+    "m_SlotType": 1,
+    "m_Hidden": false,
+    "m_ShaderOutputName": "Out",
+    "m_StageCapability": 3,
+    "m_Value": 0.0,
+    "m_DefaultValue": 0.0,
+    "m_Labels": [],
     "m_LiteralMode": false
 }
 
@@ -4785,6 +4920,9 @@
     },
     "m_Slots": [
         {
+            "m_Id": "38a42ca91d1e4f86b6545a21f9e97174"
+        },
+        {
             "m_Id": "ff471a5f3a1745a38822c86f82712340"
         },
         {
@@ -4800,10 +4938,10 @@
             "m_Id": "37b815232728442eb8f4aec726f1fe29"
         },
         {
-            "m_Id": "bdbb0adf91704169be819295e3ea4acc"
+            "m_Id": "25ad16639f294ebcbefb6fda8f4c3848"
         },
         {
-            "m_Id": "38a42ca91d1e4f86b6545a21f9e97174"
+            "m_Id": "bdbb0adf91704169be819295e3ea4acc"
         }
     ],
     "synonyms": [

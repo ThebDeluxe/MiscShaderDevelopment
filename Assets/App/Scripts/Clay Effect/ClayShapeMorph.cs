@@ -64,6 +64,14 @@ public class ClayShapeMorph : MonoBehaviour
         [Tooltip("Narrowing toward the far end. 0 is straight-sided, 1 comes to a point.")]
         [Range(0f, 1f)] public float taper = 0f;
 
+        [Tooltip("How vertices are placed on the shape.\n\n" +
+                 "0 keeps each vertex's own direction, which covers flat faces evenly and " +
+                 "suits SQUARE shapes - but on a flat shape it collapses the top cap into a " +
+                 "small central disc.\n\n" +
+                 "1 places them by angle, which keeps FLAT shapes spread - but bunches " +
+                 "vertices at the corners of square ones, smearing the faces.")]
+        [Range(0f, 1f)] public float spread = 1f;
+
         [Tooltip("Which way the long axis points when this shape forms.")]
         public ClayShapeAxis axis = ClayShapeAxis.WorldUp;
 
@@ -71,13 +79,15 @@ public class ClayShapeMorph : MonoBehaviour
         public float duration = 0.35f;
 
         public ShapeDefinition(float width, float length, float crossRoundness,
-                               float endRoundness, float taper, ClayShapeAxis axis)
+                               float endRoundness, float taper, float spread,
+                               ClayShapeAxis axis)
         {
             this.width = width;
             this.length = length;
             this.crossRoundness = crossRoundness;
             this.endRoundness = endRoundness;
             this.taper = taper;
+            this.spread = spread;
             this.axis = axis;
             this.duration = 0.35f;
         }
@@ -96,25 +106,25 @@ public class ClayShapeMorph : MonoBehaviour
 
     [Header("Shapes")]
     [Tooltip("Wide and flat, with a rounded rim.")]
-    public ShapeDefinition pancake = new ShapeDefinition(1.5f, 0.25f, 1f, 0.3f, 0f, ClayShapeAxis.WorldUp);
+    public ShapeDefinition pancake = new ShapeDefinition(1.5f, 0.25f, 1f, 0.3f, 0f, 1f, ClayShapeAxis.WorldUp);
 
     [Tooltip("Long and thin, lying along the direction of travel.")]
-    public ShapeDefinition noodle = new ShapeDefinition(0.45f, 2.2f, 1f, 1f, 0f, ClayShapeAxis.Travel);
+    public ShapeDefinition noodle = new ShapeDefinition(0.45f, 2.2f, 1f, 1f, 0f, 0.5f, ClayShapeAxis.Travel);
 
     [Tooltip("A less flat pancake - proper flat faces and a rounded edge.")]
-    public ShapeDefinition cylinder = new ShapeDefinition(1f, 0.9f, 1f, 0.2f, 0f, ClayShapeAxis.WorldUp);
+    public ShapeDefinition cylinder = new ShapeDefinition(1f, 0.9f, 1f, 0.2f, 0f, 1f, ClayShapeAxis.WorldUp);
 
     [Tooltip("Rectangular prism. Square cross-section, flat ends.")]
-    public ShapeDefinition box = new ShapeDefinition(0.85f, 0.85f, 0f, 0.05f, 0f, ClayShapeAxis.WorldUp);
+    public ShapeDefinition box = new ShapeDefinition(0.85f, 0.85f, 0f, 0.05f, 0f, 0f, ClayShapeAxis.WorldUp);
 
     [Tooltip("Round base tapering to a point.")]
-    public ShapeDefinition cone = new ShapeDefinition(1.2f, 1.1f, 1f, 0.1f, 0.95f, ClayShapeAxis.WorldUp);
+    public ShapeDefinition cone = new ShapeDefinition(1.2f, 1.1f, 1f, 0.1f, 0.95f, 0.5f, ClayShapeAxis.WorldUp);
 
     [Tooltip("Square base tapering to a point.")]
-    public ShapeDefinition pyramid = new ShapeDefinition(1.1f, 1.1f, 0f, 0.05f, 0.95f, ClayShapeAxis.WorldUp);
+    public ShapeDefinition pyramid = new ShapeDefinition(1.1f, 1.1f, 0f, 0.05f, 0.95f, 0f, ClayShapeAxis.WorldUp);
 
     [Tooltip("Rounded both ends, like a stretched pill.")]
-    public ShapeDefinition capsule = new ShapeDefinition(0.6f, 1.5f, 1f, 1f, 0f, ClayShapeAxis.WorldUp);
+    public ShapeDefinition capsule = new ShapeDefinition(0.6f, 1.5f, 1f, 1f, 0f, 0.5f, ClayShapeAxis.WorldUp);
 
     [Header("Blending")]
     public AnimationCurve blendCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
@@ -123,12 +133,14 @@ public class ClayShapeMorph : MonoBehaviour
     const string PivotProperty = "_ShapePivot";
     const string SizeProperty = "_ShapeSize";
     const string ParamsProperty = "_ShapeParams";
+    const string SpreadProperty = "_ShapeSpread";
     const string AmountProperty = "_ShapeAmount";
 
     static readonly int AxisID = Shader.PropertyToID(AxisProperty);
     static readonly int PivotID = Shader.PropertyToID(PivotProperty);
     static readonly int SizeID = Shader.PropertyToID(SizeProperty);
     static readonly int ParamsID = Shader.PropertyToID(ParamsProperty);
+    static readonly int SpreadID = Shader.PropertyToID(SpreadProperty);
     static readonly int AmountID = Shader.PropertyToID(AmountProperty);
 
     readonly List<Material> materials = new List<Material>();
@@ -143,6 +155,12 @@ public class ClayShapeMorph : MonoBehaviour
     bool settingsDirty;
 
     public ClayShape CurrentShape => current;
+
+    /// <summary>The shape's long axis in world space, for anything matching itself to it.</summary>
+    public Vector3 CurrentAxisWorld { get; private set; } = Vector3.up;
+
+    /// <summary>Dimensions for a shape, so colliders can be built from the same numbers.</summary>
+    public ShapeDefinition GetDefinition(ClayShape shape) => DefinitionFor(shape);
 
     /// <summary>Adds another renderer to be shaped alongside this one, e.g. an absorbed blob.</summary>
     public void AddRenderer(Renderer renderer)
@@ -241,12 +259,15 @@ public class ClayShapeMorph : MonoBehaviour
     void PushShape(ShapeDefinition definition, Vector3 customWorldAxis)
     {
         Vector3 worldAxis = ResolveAxis(definition, customWorldAxis);
+        CurrentAxisWorld = worldAxis;
+
         Vector3 axisOS = targetRenderer.transform.InverseTransformDirection(worldAxis);
 
         SetAll(AxisID, axisOS);
         SetAll(SizeID, new Vector3(definition.width, definition.width, definition.length));
         SetAll(ParamsID, new Vector4(definition.crossRoundness, definition.endRoundness,
                                      definition.taper, Mathf.Max(baseRadius, 0.01f)));
+        SetAll(SpreadID, definition.spread);
         SetAll(PivotID, pivotLocal);
     }
 

@@ -9,6 +9,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 4192387480525380367}
+  - component: {fileID: 5736149953558448920}
   - component: {fileID: 6588635645056384827}
   - component: {fileID: 9136238580414757555}
   - component: {fileID: 4807807607735546416}
@@ -37,6 +38,28 @@ Transform:
   - {fileID: 6625386134798469017}
   m_Father: {fileID: 5379039925519020834}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &5736149953558448920
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2782824578610637868}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ced6c8c907e2eae49845e2eecbf9328e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ClayShapeColliders
+  body: {fileID: 0}
+  morph: {fileID: 3616685081389852692}
+  controller: {fileID: 2975038467675803792}
+  material: {fileID: 13400000, guid: 103a7413afe344d489070d47d268c84d, type: 2}
+  innerScale: 0.6
+  rimSegments: 8
+  coneRings: 3
+  pinInertia: 1
+  inertiaScale: 1
+  drawGizmos: 1
 --- !u!114 &6588635645056384827
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -453,11 +476,12 @@ MonoBehaviour:
   pivotLocal: {x: 0, y: 0, z: 0}
   baseRadius: 0.7
   pancake:
-    width: 3
-    length: 0.25
+    width: 2
+    length: 0.2
     crossRoundness: 1
-    endRoundness: 0
+    endRoundness: 0.25
     taper: 0
+    spread: 0.9
     axis: 0
     duration: 0.35
   noodle:
@@ -466,6 +490,7 @@ MonoBehaviour:
     crossRoundness: 1
     endRoundness: 0
     taper: 0
+    spread: 0.8
     axis: 1
     duration: 0.35
   cylinder:
@@ -474,6 +499,7 @@ MonoBehaviour:
     crossRoundness: 1
     endRoundness: 0
     taper: 0
+    spread: 0.25
     axis: 0
     duration: 0.35
   box:
@@ -482,6 +508,7 @@ MonoBehaviour:
     crossRoundness: 0
     endRoundness: 0.05
     taper: 0
+    spread: 0
     axis: 0
     duration: 0.35
   cone:
@@ -490,6 +517,7 @@ MonoBehaviour:
     crossRoundness: 1
     endRoundness: 0.098
     taper: 0.85
+    spread: 0
     axis: 0
     duration: 0.35
   pyramid:
@@ -498,6 +526,7 @@ MonoBehaviour:
     crossRoundness: 0
     endRoundness: 0.377
     taper: 0.95
+    spread: 0
     axis: 0
     duration: 0.35
   capsule:
@@ -506,6 +535,7 @@ MonoBehaviour:
     crossRoundness: 1
     endRoundness: 1
     taper: 0
+    spread: 0.5
     axis: 0
     duration: 0.35
   blendCurve:

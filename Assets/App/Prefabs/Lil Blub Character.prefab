@@ -240,6 +240,8 @@ MonoBehaviour:
   manageColliders: 1
   innerMaterial: {fileID: 13400000, guid: 103a7413afe344d489070d47d268c84d, type: 2}
   outerMaterial: {fileID: 0}
+  shape: 0
+  shapeMorph: {fileID: 0}
   maxDepenetrationSpeed: 2
   contactOffset: 0.02
   rollTorque: 5
@@ -406,6 +408,9 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
       insertIndex: 1
       addedObject: {fileID: 3533541507451855521}
+    - targetCorrespondingSourceObject: {fileID: 919132149155446097, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
+      insertIndex: 2
+      addedObject: {fileID: 3616685081389852692}
   m_SourcePrefab: {fileID: 100100000, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
 --- !u!23 &5456451017969892598 stripped
 MeshRenderer:
@@ -432,6 +437,101 @@ MonoBehaviour:
   targetUVChannel: 2
   weldEpsilon: 0.0001
   samplesPerIsland: 32
+--- !u!114 &3616685081389852692
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5816901647401901347}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 94f046bcca5f98f48b19ac063de79e06, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ClayShapeMorph
+  targetRenderer: {fileID: 0}
+  pivotLocal: {x: 0, y: 0, z: 0}
+  baseRadius: 0.7
+  pancake:
+    width: 3
+    length: 0.25
+    crossRoundness: 1
+    endRoundness: 0
+    taper: 0
+    axis: 0
+    duration: 0.35
+  noodle:
+    width: 0.4
+    length: 3
+    crossRoundness: 1
+    endRoundness: 0
+    taper: 0
+    axis: 1
+    duration: 0.35
+  cylinder:
+    width: 0.9
+    length: 1.1
+    crossRoundness: 1
+    endRoundness: 0
+    taper: 0
+    axis: 0
+    duration: 0.35
+  box:
+    width: 0.85
+    length: 0.85
+    crossRoundness: 0
+    endRoundness: 0.05
+    taper: 0
+    axis: 0
+    duration: 0.35
+  cone:
+    width: 1.2
+    length: 1.1
+    crossRoundness: 1
+    endRoundness: 0.098
+    taper: 0.85
+    axis: 0
+    duration: 0.35
+  pyramid:
+    width: 1.1
+    length: 1.1
+    crossRoundness: 0
+    endRoundness: 0.377
+    taper: 0.95
+    axis: 0
+    duration: 0.35
+  capsule:
+    width: 0.6
+    length: 2
+    crossRoundness: 1
+    endRoundness: 1
+    taper: 0
+    axis: 0
+    duration: 0.35
+  blendCurve:
+    serializedVersion: 2
+    m_Curve:
+    - serializedVersion: 3
+      time: 0
+      value: 0
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    - serializedVersion: 3
+      time: 1
+      value: 1
+      inSlope: 0
+      outSlope: 0
+      tangentMode: 0
+      weightedMode: 0
+      inWeight: 0
+      outWeight: 0
+    m_PreInfinity: 2
+    m_PostInfinity: 2
+    m_RotationOrder: 4
 --- !u!4 &6625386134798469017 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: -8679921383154817045, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}

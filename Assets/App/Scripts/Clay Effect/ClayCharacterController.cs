@@ -54,6 +54,15 @@ public class ClayCharacterController : MonoBehaviour
              "resolve contacts.")]
     [SerializeField] private PhysicsMaterial outerMaterial;
 
+    [Header("Shape")]
+    [Tooltip("Shape the character morphs to. Changing this at runtime triggers the blend.\n\n" +
+             "Visual only for now - contact detection and rolling still treat the character " +
+             "as a sphere, so a pancake dents and rolls as though it were still round.")]
+    [SerializeField] private ClayShape shape = ClayShape.Sphere;
+
+    [Tooltip("Handles the morph. Found in children if left empty.")]
+    [SerializeField] private ClayShapeMorph shapeMorph;
+
     [Header("Contact Softness")]
     [Tooltip("How fast the solver may push the assembly out of something it overlaps, in " +
              "metres per second.\n\n" +
@@ -293,6 +302,7 @@ public class ClayCharacterController : MonoBehaviour
 
         if (steeringCamera == null) steeringCamera = FindFirstObjectByType<ThirdPersonCamera>();
         if (squash == null) squash = GetComponentInChildren<SquashStretch>();
+        if (shapeMorph == null) shapeMorph = GetComponentInChildren<ClayShapeMorph>();
 
         // The inner collider is created at runtime, so it cannot be assigned in the
         // inspector. Its bottom is the ground contact, which is where the squash should
@@ -430,6 +440,9 @@ public class ClayCharacterController : MonoBehaviour
     private void Update()
     {
         moveInput = moveAction.ReadValue<Vector2>();
+
+        // Picked up from the inspector, so the dropdown can be changed live while testing.
+        if (shapeMorph != null && shapeMorph.CurrentShape != shape) shapeMorph.SetShape(shape);
 
         // Build up the jump charge while Space is held (capped at maxChargeTime).
         if (isCharging)

@@ -35,15 +35,22 @@ public class ClayShapeColliders : MonoBehaviour
     public PhysicsMaterial material;
 
     [Header("Sizing")]
-    [Tooltip("How large the PHYSICAL collider is compared to the visible shape.\n\n" +
-             "Below 1 by design: the gap is what the mesh sinks by, and that sink is what " +
-             "the dent effect flattens. One value covers every shape.")]
-    [Range(0.2f, 1f)] public float innerScale = 0.6f;
+    [Tooltip("Multiplies every shape's own Collider Scale, for adjusting all of them at once " +
+             "without losing their relative sizing. Leave at 1 and tune per shape on the " +
+             "ClayShapeMorph.")]
+    [Range(0.2f, 2f)] public float sizeMultiplier = 1f;
 
     [Header("Composite Detail")]
     [Tooltip("Spheres around the rim of a cylinder or cone. More is a rounder silhouette " +
              "and more contacts for the solver to chew through.")]
     [Range(4, 16)] public int rimSegments = 8;
+
+    [Tooltip("Boxes rotated evenly to fill a circular face. Three gives a twelve-sided fit; " +
+             "one is a plain inscribed square.\n\n" +
+             "Boxes rather than spheres because a sphere bulges through a flat face - it is " +
+             "a poor fit for a disc, so it would take many badly placed ones to do what a " +
+             "few rotated boxes do exactly.")]
+    [Range(1, 5)] public int discFillBoxes = 3;
 
     [Tooltip("Rings of spheres up a cone, spreading its taper over several steps.")]
     [Range(1, 5)] public int coneRings = 3;
@@ -65,6 +72,7 @@ public class ClayShapeColliders : MonoBehaviour
 
     Transform holder;
     ClayShape applied = ClayShape.Sphere;
+    Vector3 alignedAxis = Vector3.zero;
     bool built;
 
     void Start()
@@ -103,8 +111,42 @@ public class ClayShapeColliders : MonoBehaviour
 
     void Update()
     {
-        if (!built || morph.CurrentShape == applied) return;
-        Rebuild(morph.CurrentShape);
+        if (!built) return;
+
+        if (morph.CurrentShape != applied)
+        {
+            Rebuild(morph.CurrentShape);
+            return;
+        }
+
+        // The renderer is a child of the body and has no rotation of its own, so once the
+        // holder is aimed it stays correct as the body rolls. Only a change to the AXIS
+        // itself needs picking up - live tuning re-pushes the shape, and a Travel-axis shape
+        // resolves a new direction each time. Comparing the object-space axis is a field
+        // read, so this costs nothing per frame.
+        if (morph.CurrentAxisObject != alignedAxis) AlignHolder();
+    }
+
+    /// <summary>
+    /// Points the holder along the shape's axis, expressed relative to the BODY.
+    ///
+    /// Working in body space rather than world means the pieces ride the body's rotation
+    /// naturally, and only the genuine offset between renderer and body is applied - a
+    /// world-space aim taken once would bake that offset in as a permanent error.
+    /// </summary>
+    void AlignHolder()
+    {
+        alignedAxis = morph.CurrentAxisObject;
+
+        if (applied == ClayShape.Sphere) return;   // a sphere has no orientation to match
+
+        Vector3 axisWS = morph.CurrentAxisWorld;
+        if (axisWS.sqrMagnitude < 1e-6f) return;
+
+        Vector3 axisLocal = body.transform.InverseTransformDirection(axisWS);
+        if (axisLocal.sqrMagnitude < 1e-6f) return;
+
+        holder.localRotation = Quaternion.LookRotation(axisLocal.normalized, SafeUp(axisLocal));
     }
 
     void Rebuild(ClayShape shape)
@@ -114,36 +156,39 @@ public class ClayShapeColliders : MonoBehaviour
 
         float baseRadius = morph.baseRadius;
 
-        if (shape == ClayShape.Sphere)
+        // Per shape, since a flat pancake and a chunky box want different amounts of sink -
+        // and a shape built from a composite usually wants a little more clearance than one
+        // a single primitive fits exactly.
+        var d = morph.GetDefinition(shape);
+        float scale = (d != null ? d.colliderScale : 0.6f) * Mathf.Max(sizeMultiplier, 0.01f);
+
+        if (shape == ClayShape.Sphere || d == null)
         {
             holder.localRotation = Quaternion.identity;
-            AddSphere(Vector3.zero, baseRadius * innerScale);
-            Finish();
+            AddSphere(Vector3.zero, baseRadius * scale);
+            Finish(scale);
             return;
         }
 
-        var d = morph.GetDefinition(shape);
-        if (d == null) { AddSphere(Vector3.zero, baseRadius * innerScale); Finish(); return; }
+        // The pieces below are built with +Z as the axis; the holder is aimed so that lines
+        // up with the shape. Done relative to the body rather than in world space, so it
+        // stays correct as the body rolls - see AlignHolder.
+        AlignHolder();
 
-        // The shape's axis is captured in the RENDERER's object space; the pieces live under
-        // the body, so the holder is aimed along it and everything below is built in its
-        // local frame with +Z as the axis.
-        Vector3 axisWS = morph.CurrentAxisWorld;
-        holder.rotation = Quaternion.LookRotation(axisWS, SafeUp(axisWS));
-
-        float across = d.width * baseRadius * innerScale;
-        float along = d.length * baseRadius * innerScale;
+        float across = d.width * baseRadius * scale;
+        float thick = d.SafeThickness * baseRadius * scale;
+        float along = d.length * baseRadius * scale;
 
         bool square = d.crossRoundness < 0.5f;
         bool rounded = d.endRoundness > 0.6f;
-        bool elongated = along > across * 1.4f;
+        bool elongated = along > Mathf.Max(across, thick) * 1.4f;
 
         if (d.taper > 0.3f) BuildTapered(across, along, square);
-        else if (square) BuildBoxCage(across, along);
-        else if (rounded && elongated) BuildCapsule(across, along);
+        else if (square) BuildBoxCage(across, thick, along);
+        else if (rounded && elongated) BuildCapsule(Mathf.Min(across, thick), along);
         else BuildDisc(across, along);
 
-        Finish();
+        Finish(scale);
     }
 
     /// <summary>Long and round: one capsule is already the right shape.</summary>
@@ -179,10 +224,34 @@ public class ClayShapeColliders : MonoBehaviour
             capsule.transform.localPosition = position;
         }
 
-        // Fills the faces so things do not fall between the rim pieces.
-        float inner = ringRadius * Mathf.Sqrt(2f) * 0.5f;
-        var box = New<BoxCollider>("Face");
-        box.size = new Vector3(inner * 2f, inner * 2f, Mathf.Max(along * 2f - 0.01f, 0.01f));
+        // Fills the face. Rotated boxes rather than spheres: a sphere bulges through a flat
+        // face, so it fits a disc badly, where each box is exactly flat and a few rotated
+        // evenly inscribe the circle closely.
+        FillDisc(ringRadius, Mathf.Max(along - rimRadius, 0.01f), Vector3.zero);
+    }
+
+    /// <summary>
+    /// Inscribes a circle with rotated boxes.
+    ///
+    /// Each is sized so its corners land exactly on the circle - half extents of
+    /// (R cos t, R sin t) at t = pi / 2N - so the union stays inside the silhouette however
+    /// many are used. One is an inscribed square; three cover it closely.
+    /// </summary>
+    void FillDisc(float radius, float halfDepth, Vector3 centre)
+    {
+        int count = Mathf.Max(discFillBoxes, 1);
+        float t = Mathf.PI / (2f * count);
+
+        float halfX = radius * Mathf.Cos(t);
+        float halfY = radius * Mathf.Sin(t);
+
+        for (int i = 0; i < count; i++)
+        {
+            var box = New<BoxCollider>($"Face {i}");
+            box.size = new Vector3(halfX * 2f, halfY * 2f, Mathf.Max(halfDepth * 2f, 0.01f));
+            box.transform.localPosition = centre;
+            box.transform.localRotation = Quaternion.Euler(0f, 0f, i * 180f / count);
+        }
     }
 
     /// <summary>
@@ -191,12 +260,12 @@ public class ClayShapeColliders : MonoBehaviour
     /// Rounded edges matter more than exactness here - a sharp hull corner digs in and stops
     /// the roll dead, where a capsule edge rides over.
     /// </summary>
-    void BuildBoxCage(float across, float along)
+    void BuildBoxCage(float across, float thick, float along)
     {
-        float edge = Mathf.Min(across, along) * 0.25f;
+        float edge = Mathf.Min(Mathf.Min(across, thick), along) * 0.25f;
 
         float x = Mathf.Max(across - edge, 0.01f);
-        float y = x;
+        float y = Mathf.Max(thick - edge, 0.01f);
         float z = Mathf.Max(along - edge, 0.01f);
 
         // Four edges along each axis, at the corners of the other two.
@@ -216,7 +285,7 @@ public class ClayShapeColliders : MonoBehaviour
         AddEdge(new Vector3(-x, -y, 0), 2, z, edge);
 
         var box = New<BoxCollider>("Faces");
-        box.size = new Vector3(across * 2f, across * 2f, along * 2f);
+        box.size = new Vector3(across * 2f, thick * 2f, along * 2f);
     }
 
     void AddEdge(Vector3 position, int direction, float halfLength, float radius)
@@ -229,21 +298,27 @@ public class ClayShapeColliders : MonoBehaviour
     }
 
     /// <summary>
-    /// Cone or pyramid: rings of spheres shrinking up the axis.
+    /// Cone or pyramid: a flat base, then rings of spheres shrinking up the axis.
     ///
-    /// Rough by design - a few rings read as a taper in motion, and spheres are the cheapest
-    /// test there is, so this stays affordable even at a decent ring count.
+    /// The base is filled rather than ringed, so it rests flat instead of rocking on its
+    /// rim - which is what a ring of spheres alone gives you.
     /// </summary>
     void BuildTapered(float across, float along, bool square)
     {
-        for (int ring = 0; ring < coneRings; ring++)
+        // A proper flat bottom, using the same rotated-box fill as a disc face.
+        float baseThickness = Mathf.Max(along * 0.18f, 0.02f);
+        FillDisc(across, baseThickness, new Vector3(0f, 0f, -along + baseThickness));
+
+        // Rings above it carry the taper. Started past the base so they do not simply
+        // duplicate it.
+        for (int ring = 1; ring < coneRings; ring++)
         {
-            float t = coneRings > 1 ? ring / (float)(coneRings - 1) : 0f;
+            float t = ring / (float)Mathf.Max(coneRings - 1, 1);
 
             float z = Mathf.Lerp(-along, along, t);
-            float radius = Mathf.Lerp(across, across * 0.15f, t);
+            float radius = Mathf.Lerp(across, across * 0.12f, t);
 
-            float sphereRadius = Mathf.Max(radius * 0.45f, 0.02f);
+            float sphereRadius = Mathf.Max(radius * 0.5f, 0.02f);
             float ringRadius = Mathf.Max(radius - sphereRadius, 0f);
 
             if (ringRadius < 0.01f)
@@ -261,7 +336,8 @@ public class ClayShapeColliders : MonoBehaviour
                                       Mathf.Sin(angle) * ringRadius, z), sphereRadius);
             }
 
-            AddSphere(new Vector3(0, 0, z), Mathf.Max(ringRadius, sphereRadius));
+            // Fills the middle of the ring, so nothing falls through the gap.
+            AddSphere(new Vector3(0, 0, z), sphereRadius);
         }
     }
 
@@ -306,11 +382,11 @@ public class ClayShapeColliders : MonoBehaviour
     /// handling consistent: a box would otherwise resist rolling differently from a sphere
     /// purely because its pieces are arranged differently.
     /// </summary>
-    void Finish()
+    void Finish(float scale)
     {
         if (!pinInertia || body == null) return;
 
-        float radius = morph.baseRadius * innerScale;
+        float radius = morph.baseRadius * scale;
 
         // A solid sphere: 2/5 m r^2 on every axis.
         float inertia = 0.4f * body.mass * radius * radius * Mathf.Max(inertiaScale, 0.01f);

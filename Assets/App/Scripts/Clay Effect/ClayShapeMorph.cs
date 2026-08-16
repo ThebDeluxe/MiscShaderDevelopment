@@ -12,7 +12,7 @@ public enum ClayShape
     Box = 4,
     Cone = 5,
     Pyramid = 6,
-    Capsule = 7
+    Plank = 7
 }
 
 /// <summary>Which way a shape's long axis points when it forms.</summary>
@@ -51,6 +51,11 @@ public class ClayShapeMorph : MonoBehaviour
         [Tooltip("Half extent across the axis, relative to the character's radius.")]
         public float width = 1.4f;
 
+        [Tooltip("Half extent across the OTHER cross-axis. 0 matches Width, giving a " +
+                 "circular or square cross-section; a smaller value flattens it into a " +
+                 "plank or a blade.")]
+        public float thickness = 0f;
+
         [Tooltip("Half extent along the axis, relative to the character's radius.")]
         public float length = 0.3f;
 
@@ -75,19 +80,31 @@ public class ClayShapeMorph : MonoBehaviour
         [Tooltip("Which way the long axis points when this shape forms.")]
         public ClayShapeAxis axis = ClayShapeAxis.WorldUp;
 
+        [Tooltip("How large the PHYSICAL collider is compared to this shape's visible size.\n\n" +
+                 "Below 1 by design: the gap is what the mesh sinks by, and that sink is " +
+                 "what the dent effect flattens. Per shape, because a flat pancake and a " +
+                 "chunky box want different amounts - and a shape approximated by a " +
+                 "composite often wants a little more clearance than one that fits exactly.")]
+        [Range(0.2f, 1f)] public float colliderScale = 0.75f;
+
         [Tooltip("Seconds to morph into this shape.")]
         public float duration = 0.35f;
 
-        public ShapeDefinition(float width, float length, float crossRoundness,
-                               float endRoundness, float taper, float spread,
-                               ClayShapeAxis axis)
+        /// <summary>Thickness, falling back to Width for a symmetric cross-section.</summary>
+        public float SafeThickness => thickness > 0.001f ? thickness : width;
+
+        public ShapeDefinition(float width, float thickness, float length,
+                               float crossRoundness, float endRoundness, float taper,
+                               float spread, float colliderScale, ClayShapeAxis axis)
         {
             this.width = width;
+            this.thickness = thickness;
             this.length = length;
             this.crossRoundness = crossRoundness;
             this.endRoundness = endRoundness;
             this.taper = taper;
             this.spread = spread;
+            this.colliderScale = colliderScale;
             this.axis = axis;
             this.duration = 0.35f;
         }
@@ -105,26 +122,30 @@ public class ClayShapeMorph : MonoBehaviour
     public float baseRadius = 0.7f;
 
     [Header("Shapes")]
+    [Tooltip("The character at rest. Only its collider scale is used - the mesh is already " +
+             "this shape, so nothing is deformed.")]
+    public ShapeDefinition sphere = new ShapeDefinition(1f, 0f, 1f, 1f, 1f, 0f, 1f, 0.57f, ClayShapeAxis.WorldUp);
+
     [Tooltip("Wide and flat, with a rounded rim.")]
-    public ShapeDefinition pancake = new ShapeDefinition(1.5f, 0.25f, 1f, 0.3f, 0f, 1f, ClayShapeAxis.WorldUp);
+    public ShapeDefinition pancake = new ShapeDefinition(1.5f, 0f, 0.25f, 1f, 0.3f, 0f, 1f, 0.8f, ClayShapeAxis.WorldUp);
 
     [Tooltip("Long and thin, lying along the direction of travel.")]
-    public ShapeDefinition noodle = new ShapeDefinition(0.45f, 2.2f, 1f, 1f, 0f, 0.5f, ClayShapeAxis.Travel);
+    public ShapeDefinition noodle = new ShapeDefinition(0.45f, 0f, 2.2f, 1f, 1f, 0f, 0.5f, 0.75f, ClayShapeAxis.Travel);
 
     [Tooltip("A less flat pancake - proper flat faces and a rounded edge.")]
-    public ShapeDefinition cylinder = new ShapeDefinition(1f, 0.9f, 1f, 0.2f, 0f, 1f, ClayShapeAxis.WorldUp);
+    public ShapeDefinition cylinder = new ShapeDefinition(1f, 0f, 0.9f, 1f, 0.2f, 0f, 1f, 0.75f, ClayShapeAxis.WorldUp);
 
     [Tooltip("Rectangular prism. Square cross-section, flat ends.")]
-    public ShapeDefinition box = new ShapeDefinition(0.85f, 0.85f, 0f, 0.05f, 0f, 0f, ClayShapeAxis.WorldUp);
+    public ShapeDefinition box = new ShapeDefinition(0.85f, 0f, 0.85f, 0f, 0.05f, 0f, 0f, 0.75f, ClayShapeAxis.WorldUp);
 
     [Tooltip("Round base tapering to a point.")]
-    public ShapeDefinition cone = new ShapeDefinition(1.2f, 1.1f, 1f, 0.1f, 0.95f, 0.5f, ClayShapeAxis.WorldUp);
+    public ShapeDefinition cone = new ShapeDefinition(1.2f, 0f, 1.1f, 1f, 0.1f, 0.95f, 0.5f, 0.7f, ClayShapeAxis.WorldUp);
 
     [Tooltip("Square base tapering to a point.")]
-    public ShapeDefinition pyramid = new ShapeDefinition(1.1f, 1.1f, 0f, 0.05f, 0.95f, 0f, ClayShapeAxis.WorldUp);
+    public ShapeDefinition pyramid = new ShapeDefinition(1.1f, 0f, 1.1f, 0f, 0.05f, 0.95f, 0f, 0.7f, ClayShapeAxis.WorldUp);
 
-    [Tooltip("Rounded both ends, like a stretched pill.")]
-    public ShapeDefinition capsule = new ShapeDefinition(0.6f, 1.5f, 1f, 1f, 0f, 0.5f, ClayShapeAxis.WorldUp);
+    [Tooltip("Long, wide and thin - a wooden plank. Lies along the direction of travel.")]
+    public ShapeDefinition plank = new ShapeDefinition(0.9f, 0.22f, 2f, 0f, 0.05f, 0f, 0f, 0.8f, ClayShapeAxis.Travel);
 
     [Header("Blending")]
     public AnimationCurve blendCurve = AnimationCurve.EaseInOut(0f, 0f, 1f, 1f);
@@ -157,7 +178,20 @@ public class ClayShapeMorph : MonoBehaviour
     public ClayShape CurrentShape => current;
 
     /// <summary>The shape's long axis in world space, for anything matching itself to it.</summary>
-    public Vector3 CurrentAxisWorld { get; private set; } = Vector3.up;
+    public Vector3 CurrentAxisWorld =>
+        targetRenderer != null ? targetRenderer.transform.TransformDirection(currentAxisObject)
+                               : currentAxisObject;
+
+    /// <summary>
+    /// The axis in the RENDERER's object space, which is where the shader holds it.
+    ///
+    /// Anything lining itself up with the shape has to start from this rather than from a
+    /// world-space snapshot: the snapshot goes stale the moment the character turns, and
+    /// any rotation between the renderer and the body puts the two permanently out of step.
+    /// </summary>
+    public Vector3 CurrentAxisObject => currentAxisObject;
+
+    Vector3 currentAxisObject = Vector3.up;
 
     /// <summary>Dimensions for a shape, so colliders can be built from the same numbers.</summary>
     public ShapeDefinition GetDefinition(ClayShape shape) => DefinitionFor(shape);
@@ -229,13 +263,14 @@ public class ClayShapeMorph : MonoBehaviour
         baseRadius = Mathf.Max(0.01f, baseRadius);
 
         // Every shape's length and width are half extents, so zero would collapse the mesh.
+        ClampDefinition(sphere);
         ClampDefinition(pancake);
         ClampDefinition(noodle);
         ClampDefinition(cylinder);
         ClampDefinition(box);
         ClampDefinition(cone);
         ClampDefinition(pyramid);
-        ClampDefinition(capsule);
+        ClampDefinition(plank);
 
         settingsDirty = true;
     }
@@ -259,12 +294,12 @@ public class ClayShapeMorph : MonoBehaviour
     void PushShape(ShapeDefinition definition, Vector3 customWorldAxis)
     {
         Vector3 worldAxis = ResolveAxis(definition, customWorldAxis);
-        CurrentAxisWorld = worldAxis;
+        Vector3 axisOS = targetRenderer.transform.InverseTransformDirection(worldAxis).normalized;
 
-        Vector3 axisOS = targetRenderer.transform.InverseTransformDirection(worldAxis);
+        currentAxisObject = axisOS;
 
         SetAll(AxisID, axisOS);
-        SetAll(SizeID, new Vector3(definition.width, definition.width, definition.length));
+        SetAll(SizeID, new Vector3(definition.width, definition.SafeThickness, definition.length));
         SetAll(ParamsID, new Vector4(definition.crossRoundness, definition.endRoundness,
                                      definition.taper, Mathf.Max(baseRadius, 0.01f)));
         SetAll(SpreadID, definition.spread);
@@ -336,8 +371,8 @@ public class ClayShapeMorph : MonoBehaviour
             case ClayShape.Box: return box;
             case ClayShape.Cone: return cone;
             case ClayShape.Pyramid: return pyramid;
-            case ClayShape.Capsule: return capsule;
-            default: return pancake;
+            case ClayShape.Plank: return plank;
+            default: return sphere;
         }
     }
 

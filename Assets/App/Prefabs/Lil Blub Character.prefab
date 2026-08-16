@@ -54,8 +54,9 @@ MonoBehaviour:
   morph: {fileID: 3616685081389852692}
   controller: {fileID: 2975038467675803792}
   material: {fileID: 13400000, guid: 103a7413afe344d489070d47d268c84d, type: 2}
-  innerScale: 0.6
-  rimSegments: 8
+  sizeMultiplier: 1
+  rimSegments: 16
+  discFillBoxes: 3
   coneRings: 3
   pinInertia: 1
   inertiaScale: 1
@@ -284,6 +285,7 @@ MonoBehaviour:
   minJumpDuration: 0.45
   maxJumpDuration: 0.85
   maxChargeTime: 0.5
+  groundContact: {fileID: 0}
   groundMask:
     serializedVersion: 2
     m_Bits: 4294967295
@@ -475,68 +477,93 @@ MonoBehaviour:
   targetRenderer: {fileID: 0}
   pivotLocal: {x: 0, y: 0, z: 0}
   baseRadius: 0.7
+  sphere:
+    width: 1
+    thickness: 0
+    length: 1
+    crossRoundness: 1
+    endRoundness: 1
+    taper: 0
+    spread: 1
+    axis: 0
+    colliderScale: 0.57
+    duration: 0.35
   pancake:
     width: 2
+    thickness: 0
     length: 0.2
     crossRoundness: 1
     endRoundness: 0.25
     taper: 0
     spread: 0.9
     axis: 0
+    colliderScale: 0.8
     duration: 0.35
   noodle:
     width: 0.4
+    thickness: 0
     length: 3
     crossRoundness: 1
     endRoundness: 0
     taper: 0
     spread: 0.8
     axis: 1
+    colliderScale: 0.75
     duration: 0.35
   cylinder:
     width: 0.9
+    thickness: 0
     length: 1.1
     crossRoundness: 1
     endRoundness: 0
     taper: 0
     spread: 0.25
     axis: 0
+    colliderScale: 0.75
     duration: 0.35
   box:
     width: 0.85
+    thickness: 0
     length: 0.85
     crossRoundness: 0
     endRoundness: 0.05
     taper: 0
     spread: 0
     axis: 0
+    colliderScale: 0.75
     duration: 0.35
   cone:
     width: 1.2
+    thickness: 0
     length: 1.1
     crossRoundness: 1
     endRoundness: 0.098
     taper: 0.85
     spread: 0
     axis: 0
+    colliderScale: 0.7
     duration: 0.35
   pyramid:
     width: 1.1
+    thickness: 0
     length: 1.1
     crossRoundness: 0
     endRoundness: 0.377
     taper: 0.95
     spread: 0
     axis: 0
+    colliderScale: 0.7
     duration: 0.35
-  capsule:
-    width: 0.6
-    length: 2
-    crossRoundness: 1
-    endRoundness: 1
+  plank:
+    width: 0.8
+    thickness: 0.22
+    length: 3
+    crossRoundness: 0
+    endRoundness: 0
     taper: 0
-    spread: 0.5
-    axis: 0
+    spread: 0
+    axis: 1
+    colliderScale: 0.8
     duration: 0.35
   blendCurve:
     serializedVersion: 2

@@ -36,13 +36,15 @@
 
 // Neither placement is right for every shape, so they are blended per shape - see Spread.
 //
-//   Radial    : keep each vertex's own direction and move it onto the surface. Faces stay
-//               evenly covered on square shapes, but on a flat shape the whole top cap
-//               points roughly along the axis, where the surface is only the half-height,
-//               so it collapses into a small central disc.
-//   Parametric: place vertices by latitude and longitude instead. Flat shapes stay spread,
-//               but on square shapes vertices bunch at the corners - even angle spacing is
-//               not even surface spacing - and the faces smear.
+//   Warp      : scale each vertex's own POSITION by the extents, squared off by a factor
+//               that depends only on its direction. Every point along a ray moves by the
+//               same amount, so anything off the body keeps its position relative to what
+//               is beneath it - a hat stays on the head. Faces stay evenly covered on
+//               square shapes, but on a very flat shape the vertices that were near the
+//               poles end up crowded.
+//   Parametric: place vertices by latitude and longitude instead. Flat shapes stay evenly
+//               spread, but vertices are RE-PLACED rather than moved, so detail loses its
+//               relative position - and on square shapes they bunch at the corners.
 
 // Signed power, since the parametrisation needs to keep the sign of each angle term.
 float ClaySignedPow(float v, float e)
@@ -56,15 +58,20 @@ float ClayRoundnessToExponent(float roundness)
     return lerp(0.15, 1.0, saturate(roundness));
 }
 
-// Where the surface sits along a direction, for the radial placement.
-float ClaySurfaceDistance(float3 dir, float3 halfExtents, float crossExp, float profileExp)
+// Where the surface sits along a direction in NORMALISED space, for the radial placement.
+//
+// Normalised meaning the extents have already been divided out, so the target is the unit
+// superellipsoid. That matters: projecting along a vertex's raw direction collapses
+// anything pointing down a short axis onto that short surface, so a plank pinches toward
+// its centre plane. A cube hides it only because its extents are equal.
+float ClaySurfaceDistance(float3 dir, float crossExp, float profileExp)
 {
     // Implicit form of the same superellipsoid, with the exponents inverted: the
     // parametric e maps to an implicit 2/e.
     float m = 2.0 / max(crossExp, 1e-3);
     float n = 2.0 / max(profileExp, 1e-3);
 
-    float3 d = abs(dir / max(halfExtents, 1e-4));
+    float3 d = abs(dir);
 
     float across = pow(max(d.x, 1e-6), m) + pow(max(d.y, 1e-6), m);
     across = pow(across, n / m);
@@ -80,8 +87,8 @@ float ClaySurfaceDistance(float3 dir, float3 halfExtents, float crossExp, float 
 /// PivotOS      point the shape is built around
 /// Size         half extents: x and y across the axis, z along it, relative to BaseRadius
 /// Params       x = cross roundness, y = profile roundness, z = taper, w = base radius
-/// Spread       0 keeps each vertex's own direction, 1 places them by angle. Low suits
-///              square shapes, high suits flat ones - see the note above.
+/// Spread       0 warps positions, keeping detail where it sat. 1 places vertices by angle,
+///              which spreads flat shapes evenly but moves detail off its body.
 /// Amount       0 = untouched, 1 = fully the target shape
 /// </summary>
 void ApplyClayShape_float(float3 PositionOS, float3 AxisOS, float3 PivotOS,
@@ -132,10 +139,23 @@ void ApplyClayShape_float(float3 PositionOS, float3 AxisOS, float3 PivotOS,
 
     float3 extents = Size * baseRadius;
 
-    // How deep the vertex sits, as a fraction of the base radius, so interior vertices
-    // stay interior instead of collapsing onto the shell.
-    float depth = radius / baseRadius;
+    // --- placement one: WARP ---
+    // Scale the vertex's own position by the extents, then square it off by a factor that
+    // depends only on its direction. Because every point along a ray is scaled by the same
+    // amount, anything sitting off the body - a hat, an ear - keeps its position relative
+    // to what is beneath it.
+    //
+    // This is the difference between warping the shape and projecting onto it. Projection
+    // sends a vertex to wherever the surface lies in its direction, so a hat pointing at a
+    // plank's flat face lands in the middle of that face, having lost where it was. The
+    // squaring factor is 1 at round exponents, leaving a plain anisotropic scale.
+    float3 unit = local / baseRadius;
+    float3 warped = unit * extents * ClaySurfaceDistance(dir, crossExp, profileExp);
 
+    // --- placement two: PARAMETRIC ---
+    // Placed by latitude and longitude instead, which keeps vertices evenly spread on flat
+    // shapes but re-places them, so relative arrangement is not preserved.
+    float depth = radius / baseRadius;
     float latTerm = ClaySignedPow(cosLat, profileExp);
 
     float3 parametric;
@@ -143,10 +163,9 @@ void ApplyClayShape_float(float3 PositionOS, float3 AxisOS, float3 PivotOS,
     parametric.y = extents.y * latTerm * ClaySignedPow(lonDir.y, crossExp);
     parametric.z = extents.z * ClaySignedPow(sinLat, profileExp);
 
-    // The other placement: straight out along the vertex's own direction.
-    float3 radial = dir * ClaySurfaceDistance(dir, extents, crossExp, profileExp);
+    parametric *= depth;
 
-    float3 shaped = lerp(radial, parametric, saturate(Spread)) * depth;
+    float3 shaped = lerp(warped, parametric, saturate(Spread));
 
     // Taper narrows the cross-section toward the far end of the axis, which turns a
     // cylinder into a cone and a box into a pyramid.

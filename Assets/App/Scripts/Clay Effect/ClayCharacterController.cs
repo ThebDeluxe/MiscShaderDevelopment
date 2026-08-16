@@ -217,9 +217,17 @@ public class ClayCharacterController : MonoBehaviour
     [SerializeField] private float maxChargeTime = 1f;
 
     [Header("Ground Check")]
-    [Tooltip("Which layers count as ground.")]
+    [Tooltip("Reads real contacts instead of casting, so it works for any shape. Added to the " +
+             "Position Body automatically if missing.\n\n" +
+             "A cast has to assume how far down the ground is, which means assuming the " +
+             "shape - a pancake sits closer than the character's own radius and a noodle " +
+             "sits further, so no single value works for both.")]
+    [SerializeField] private ClayGroundContact groundContact;
+
+    [Tooltip("Which layers count as ground. Only used by the fallback cast.")]
     [SerializeField] private LayerMask groundMask = ~0;
-    [Tooltip("Extra distance below the ball used when testing for ground.")]
+
+    [Tooltip("Extra distance below the ball used by the fallback cast.")]
     [SerializeField] private float groundCheckPadding = 0.1f;
 
     [Header("Squash & Stretch")]
@@ -303,6 +311,15 @@ public class ClayCharacterController : MonoBehaviour
         if (steeringCamera == null) steeringCamera = FindFirstObjectByType<ThirdPersonCamera>();
         if (squash == null) squash = GetComponentInChildren<SquashStretch>();
         if (shapeMorph == null) shapeMorph = GetComponentInChildren<ClayShapeMorph>();
+
+        // Contacts are reported to the Rigidbody's GameObject, so the tracker has to live
+        // there rather than on this one.
+        if (groundContact == null && positionBody != null)
+        {
+            groundContact = positionBody.GetComponent<ClayGroundContact>();
+            if (groundContact == null)
+                groundContact = positionBody.gameObject.AddComponent<ClayGroundContact>();
+        }
 
         // The inner collider is created at runtime, so it cannot be assigned in the
         // inspector. Its bottom is the ground contact, which is where the squash should
@@ -723,15 +740,17 @@ public class ClayCharacterController : MonoBehaviour
 
     private void CheckGrounded()
     {
-        // Cast a small sphere just below the ball to detect ground. Uses the PHYSICAL
-        // radius, not the visual one, so it agrees with what actually collides.
-        float radius = innerRadius * 0.9f;
+        // Real contacts, so this is correct whatever shape the character is currently in -
+        // and whatever composite of colliders that shape is built from.
+        if (groundContact != null)
+        {
+            isGrounded = groundContact.IsGrounded;
+            return;
+        }
 
-        // Absorbed blobs hang below the body and their colliders belong to the same
-        // Rigidbody, so a SphereCast started here begins overlapping them - and Unity does
-        // not report colliders a sweep starts inside. Without extending the reach and
-        // skipping our own assembly, standing on a blob reads as airborne and jumping
-        // becomes impossible.
+        // Fallback for a setup with no contact tracker: assumes a sphere, so it will be
+        // wrong once the character morphs.
+        float radius = innerRadius * 0.9f;
         float distance = (innerRadius - radius) + groundCheckPadding + 0.05f
                          + Mathf.Max(0f, GroundProbeExtension);
 
@@ -743,7 +762,6 @@ public class ClayCharacterController : MonoBehaviour
 
         for (int i = 0; i < count; i++)
         {
-            // Parts of our own assembly are not ground.
             if (groundHits[i].collider == null) continue;
             if (groundHits[i].collider.attachedRigidbody == positionBody) continue;
 

@@ -3,6 +3,21 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
+/// <summary>How a shape's collider is built. Auto picks from the shape's own proportions.</summary>
+public enum ClayColliderStyle
+{
+    Auto = 0,
+    Sphere = 1,
+    Capsule = 2,
+    Box = 3,
+    /// <summary>Capsule rim with a filled face. Suits discs and cylinders.</summary>
+    DiscComposite = 4,
+    /// <summary>Capsules along the edges with a box filling the faces.</summary>
+    BoxCage = 5,
+    /// <summary>Flat base with rings of spheres above. Suits cones and pyramids.</summary>
+    TaperedComposite = 6
+}
+
 public enum ClayShape
 {
     Sphere = 0,
@@ -87,6 +102,11 @@ public class ClayShapeMorph : MonoBehaviour
                  "composite often wants a little more clearance than one that fits exactly.")]
         [Range(0.2f, 1f)] public float colliderScale = 0.75f;
 
+        [Tooltip("How the collider is built. Auto picks from the shape's proportions, which " +
+                 "is usually right but changes as those are tuned - set it explicitly if a " +
+                 "shape keeps landing on the wrong one.")]
+        public ClayColliderStyle colliderStyle = ClayColliderStyle.Auto;
+
         [Tooltip("Seconds to morph into this shape.")]
         public float duration = 0.35f;
 
@@ -114,6 +134,14 @@ public class ClayShapeMorph : MonoBehaviour
     [Tooltip("Renderer whose material receives the shape. Found on this object if empty.")]
     public Renderer targetRenderer;
 
+    [Tooltip("Dent manager whose stamp pass also needs the shape state. Found in parents if " +
+             "empty.\n\n" +
+             "The stamp measures each vertex against nearby surfaces, so it has to warp the " +
+             "vertex the same way this does - otherwise dents are computed for the original " +
+             "mesh and applied to a deformed one, and the surface sails straight through " +
+             "whatever it should be flattening against.")]
+    public DentManager dentManager;
+
     [Tooltip("Point the deformation is built around, in the renderer's local space.")]
     public Vector3 pivotLocal = Vector3.zero;
 
@@ -130,7 +158,11 @@ public class ClayShapeMorph : MonoBehaviour
     public ShapeDefinition pancake = new ShapeDefinition(1.5f, 0f, 0.25f, 1f, 0.3f, 0f, 1f, 0.8f, ClayShapeAxis.WorldUp);
 
     [Tooltip("Long and thin, lying along the direction of travel.")]
-    public ShapeDefinition noodle = new ShapeDefinition(0.45f, 0f, 2.2f, 1f, 1f, 0f, 0.5f, 0.75f, ClayShapeAxis.Travel);
+    public ShapeDefinition noodle = new ShapeDefinition(0.45f, 0f, 2.2f, 1f, 1f, 0f, 0.5f, 0.75f, ClayShapeAxis.Travel)
+    {
+        // One capsule is already exactly this shape, so there is nothing a composite adds.
+        colliderStyle = ClayColliderStyle.Capsule
+    };
 
     [Tooltip("A less flat pancake - proper flat faces and a rounded edge.")]
     public ShapeDefinition cylinder = new ShapeDefinition(1f, 0f, 0.9f, 1f, 0.2f, 0f, 1f, 0.75f, ClayShapeAxis.WorldUp);
@@ -196,15 +228,140 @@ public class ClayShapeMorph : MonoBehaviour
     /// <summary>Dimensions for a shape, so colliders can be built from the same numbers.</summary>
     public ShapeDefinition GetDefinition(ClayShape shape) => DefinitionFor(shape);
 
+    /// <summary>
+    /// The point the shape is built around, in world space.
+    ///
+    /// Anything measuring against the shape has to start here rather than from its own
+    /// transform: the renderer can sit somewhere else entirely - it gets re-centred as blobs
+    /// merge - so measuring from the body's origin puts the whole silhouette off by that
+    /// offset.
+    /// </summary>
+    public Vector3 PivotWorld =>
+        targetRenderer != null ? targetRenderer.transform.TransformPoint(pivotLocal)
+                               : transform.position;
+
+    /// <summary>How far the deformed surface currently reaches at its widest.</summary>
+    public float MaxRadius
+    {
+        get
+        {
+            if (current == ClayShape.Sphere) return baseRadius;
+
+            var d = DefinitionFor(current);
+            float largest = Mathf.Max(d.width, Mathf.Max(d.SafeThickness, d.length));
+
+            return Mathf.Lerp(baseRadius, largest * baseRadius, blendAmount);
+        }
+    }
+
+    /// <summary>
+    /// Distance from the pivot to the deformed surface along an OBJECT space direction.
+    ///
+    /// A C# mirror of the warp in ClayShape.hlsl, so anything that needs to know where the
+    /// character's surface actually is - contact detection especially - can ask rather than
+    /// assuming it is still a sphere. On a pancake that assumption is wrong twice over: the
+    /// rim reaches half again as far as the sphere did, while the flat faces sit at a
+    /// quarter of it.
+    ///
+    /// Keep this in step with the shader. If the shape maths changes there, it changes here.
+    /// </summary>
+    public float SurfaceDistanceObject(Vector3 directionObject)
+    {
+        if (current == ClayShape.Sphere || blendAmount < 1e-4f) return baseRadius;
+
+        Vector3 dir = directionObject.normalized;
+        if (dir.sqrMagnitude < 1e-6f) return baseRadius;
+
+        var d = DefinitionFor(current);
+
+        // Into the shape's own frame, the same basis the shader builds.
+        Vector3 w = currentAxisObject.normalized;
+        Vector3 helper = Mathf.Abs(w.y) > 0.99f ? Vector3.right : Vector3.up;
+        Vector3 u = Vector3.Cross(helper, w).normalized;
+        Vector3 v = Vector3.Cross(w, u);
+
+        var local = new Vector3(Vector3.Dot(dir, u), Vector3.Dot(dir, v), Vector3.Dot(dir, w));
+
+        var extents = new Vector3(d.width, d.SafeThickness, d.length) * baseRadius;
+
+        float crossExp = Mathf.Lerp(0.15f, 1f, Mathf.Clamp01(d.crossRoundness));
+        float profileExp = Mathf.Lerp(0.15f, 1f, Mathf.Clamp01(d.endRoundness));
+
+        float squaring = SurfaceFactor(local, crossExp, profileExp);
+
+        // The warp: a surface point starts at baseRadius along this direction.
+        var warped = new Vector3(local.x * extents.x, local.y * extents.y, local.z * extents.z)
+                     * squaring;
+
+        // Taper narrows the cross-section toward the far end.
+        float taper = Mathf.Clamp01(d.taper);
+        if (taper > 1e-4f)
+        {
+            float halfHeight = Mathf.Max(extents.z, 1e-4f);
+            float alongAxis = Mathf.Clamp01((warped.z + halfHeight) / (2f * halfHeight));
+            float scale = Mathf.Lerp(1f, Mathf.Max(1f - taper, 0f), alongAxis);
+
+            warped.x *= scale;
+            warped.y *= scale;
+        }
+
+        // Blended against the untouched sphere, matching the shader's final lerp.
+        Vector3 blended = Vector3.Lerp(local * baseRadius, warped, blendAmount);
+
+        return Mathf.Max(blended.magnitude, 1e-3f);
+    }
+
+    /// <summary>Mirror of ClaySurfaceDistance: the unit superellipsoid along a direction.</summary>
+    static float SurfaceFactor(Vector3 dir, float crossExp, float profileExp)
+    {
+        float m = 2f / Mathf.Max(crossExp, 1e-3f);
+        float n = 2f / Mathf.Max(profileExp, 1e-3f);
+
+        Vector3 a = new Vector3(Mathf.Abs(dir.x), Mathf.Abs(dir.y), Mathf.Abs(dir.z));
+
+        float across = Mathf.Pow(Mathf.Max(a.x, 1e-6f), m) + Mathf.Pow(Mathf.Max(a.y, 1e-6f), m);
+        across = Mathf.Pow(across, n / m);
+
+        float total = across + Mathf.Pow(Mathf.Max(a.z, 1e-6f), n);
+
+        return 1f / Mathf.Max(Mathf.Pow(total, 1f / n), 1e-5f);
+    }
+
+    /// <summary>Distance to the surface along a WORLD space direction.</summary>
+    public float SurfaceDistanceWorld(Vector3 directionWorld)
+    {
+        if (targetRenderer == null) return baseRadius;
+
+        return SurfaceDistanceObject(targetRenderer.transform.InverseTransformDirection(directionWorld));
+    }
+
+    float blendAmount;
+
     /// <summary>Adds another renderer to be shaped alongside this one, e.g. an absorbed blob.</summary>
     public void AddRenderer(Renderer renderer)
     {
         if (renderer == null) return;
+        AddMaterial(renderer.material);
+    }
 
-        Material instance = renderer.material;
-        if (!instance.HasProperty(AmountID) || materials.Contains(instance)) return;
+    /// <summary>
+    /// Adds a material that needs the shape state, whether or not it draws the character.
+    ///
+    /// The dent stamp pass needs it too: it measures each vertex against nearby surfaces, so
+    /// it has to warp the vertex the same way first. Measuring the original mesh instead
+    /// computes dents for where a sphere's surface was and the character shader then applies
+    /// them to a pancake, which lands the deformation nowhere near the contact.
+    /// </summary>
+    public void AddMaterial(Material instance)
+    {
+        if (instance == null || materials.Contains(instance)) return;
+        if (!instance.HasProperty(AmountID)) return;
 
         materials.Add(instance);
+
+        // Brought up to date immediately, since it has missed every push so far.
+        if (current != ClayShape.Sphere) PushShape(DefinitionFor(current), Vector3.zero);
+        else instance.SetFloat(AmountID, 0f);
     }
 
     public void RemoveRenderer(Renderer renderer)
@@ -245,6 +402,19 @@ public class ClayShapeMorph : MonoBehaviour
 
         materials.Add(material);
         SetAll(AmountID, 0f);
+
+        if (dentManager == null) dentManager = GetComponentInParent<DentManager>();
+    }
+
+    void LateUpdate()
+    {
+        // The stamp material is created lazily by DentManager, so it cannot be picked up in
+        // Start. Cheap to check, and it only ever succeeds once.
+        if (dentManager != null && dentManager.StampInstance != null)
+        {
+            AddMaterial(dentManager.StampInstance);
+            dentManager = null;
+        }
     }
 
     void Update()
@@ -396,6 +566,8 @@ public class ClayShapeMorph : MonoBehaviour
 
     void SetAll(int id, float value)
     {
+        if (id == AmountID) blendAmount = value;
+
         for (int i = 0; i < materials.Count; i++)
             if (materials[i] != null) materials[i].SetFloat(id, value);
     }

@@ -111,6 +111,7 @@ MonoBehaviour:
   merger: {fileID: 6588635645056384827}
   includeOwnBody: 1
   ownContactSource: {fileID: 0}
+  morph: {fileID: 0}
   stiffness: 120
   damping: 12
   maxOverlap: 0.3
@@ -266,6 +267,7 @@ MonoBehaviour:
   outerMaterial: {fileID: 0}
   shape: 0
   shapeMorph: {fileID: 0}
+  collisionDetection: 3
   maxDepenetrationSpeed: 2
   contactOffset: 0.02
   rollTorque: 5
@@ -487,6 +489,7 @@ MonoBehaviour:
     spread: 1
     axis: 0
     colliderScale: 0.57
+    colliderStyle: 0
     duration: 0.35
   pancake:
     width: 2
@@ -498,6 +501,7 @@ MonoBehaviour:
     spread: 0.9
     axis: 0
     colliderScale: 0.8
+    colliderStyle: 0
     duration: 0.35
   noodle:
     width: 0.4
@@ -506,9 +510,10 @@ MonoBehaviour:
     crossRoundness: 1
     endRoundness: 0
     taper: 0
-    spread: 0.8
+    spread: 0
     axis: 1
-    colliderScale: 0.75
+    colliderScale: 0.95
+    colliderStyle: 2
     duration: 0.35
   cylinder:
     width: 0.9
@@ -520,6 +525,7 @@ MonoBehaviour:
     spread: 0.25
     axis: 0
     colliderScale: 0.75
+    colliderStyle: 0
     duration: 0.35
   box:
     width: 0.85
@@ -531,6 +537,7 @@ MonoBehaviour:
     spread: 0
     axis: 0
     colliderScale: 0.75
+    colliderStyle: 0
     duration: 0.35
   cone:
     width: 1.2
@@ -542,6 +549,7 @@ MonoBehaviour:
     spread: 0
     axis: 0
     colliderScale: 0.7
+    colliderStyle: 0
     duration: 0.35
   pyramid:
     width: 1.1
@@ -553,6 +561,7 @@ MonoBehaviour:
     spread: 0
     axis: 0
     colliderScale: 0.7
+    colliderStyle: 0
     duration: 0.35
   plank:
     width: 0.8
@@ -563,7 +572,8 @@ MonoBehaviour:
     taper: 0
     spread: 0
     axis: 1
-    colliderScale: 0.8
+    colliderScale: 0.95
+    colliderStyle: 0
     duration: 0.35
   blendCurve:
     serializedVersion: 2

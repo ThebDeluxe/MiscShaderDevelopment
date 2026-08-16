@@ -75,6 +75,62 @@ public class ClayShapeColliders : MonoBehaviour
     Vector3 alignedAxis = Vector3.zero;
     bool built;
 
+    /// <summary>The primitives making up the current shape.</summary>
+    public IReadOnlyList<Collider> Pieces => pieces;
+
+    /// <summary>
+    /// Closest point on the assembly's actual collider set.
+    ///
+    /// The single source of truth for where the character's surface is. Everything else -
+    /// dent reach, pickup range, contact springs - previously carried its own copy of the
+    /// shape maths, and each copy had to be corrected into agreement separately. Asking real
+    /// geometry cannot disagree with itself.
+    /// </summary>
+    public Vector3 ClosestPoint(Vector3 worldPoint)
+    {
+        Vector3 best = worldPoint;
+        float bestSq = float.MaxValue;
+        bool found = false;
+
+        for (int i = 0; i < pieces.Count; i++)
+        {
+            if (pieces[i] == null || !pieces[i].enabled) continue;
+
+            Vector3 point = pieces[i].ClosestPoint(worldPoint);
+            float sq = (point - worldPoint).sqrMagnitude;
+
+            if (sq < bestSq) { bestSq = sq; best = point; found = true; }
+        }
+
+        return found ? best : worldPoint;
+    }
+
+    /// <summary>
+    /// Distance from a point to the collider surface. Zero when the point is inside.
+    /// </summary>
+    public float DistanceToSurface(Vector3 worldPoint)
+    {
+        return Vector3.Distance(ClosestPoint(worldPoint), worldPoint);
+    }
+
+    /// <summary>
+    /// How far the VISIBLE surface sits beyond the collider, as a ratio.
+    ///
+    /// The gap is deliberate - it is what the mesh sinks by, and what the dent effect
+    /// flattens - so anything matching the silhouette rather than the collision has to
+    /// scale outward by this.
+    /// </summary>
+    public float VisualOverCollider
+    {
+        get
+        {
+            var d = morph != null ? morph.GetDefinition(applied) : null;
+            float scale = (d != null ? d.colliderScale : 0.6f) * Mathf.Max(sizeMultiplier, 0.01f);
+
+            return 1f / Mathf.Max(scale, 0.01f);
+        }
+    }
+
     void Start()
     {
         if (body == null) body = GetComponent<Rigidbody>();
@@ -183,10 +239,42 @@ public class ClayShapeColliders : MonoBehaviour
         bool rounded = d.endRoundness > 0.6f;
         bool elongated = along > Mathf.Max(across, thick) * 1.4f;
 
-        if (d.taper > 0.3f) BuildTapered(across, along, square);
-        else if (square) BuildBoxCage(across, thick, along);
-        else if (rounded && elongated) BuildCapsule(Mathf.Min(across, thick), along);
-        else BuildDisc(across, along);
+        ClayColliderStyle style = d.colliderStyle;
+
+        if (style == ClayColliderStyle.Auto)
+        {
+            if (d.taper > 0.3f) style = ClayColliderStyle.TaperedComposite;
+            else if (square) style = ClayColliderStyle.BoxCage;
+            else if (rounded && elongated) style = ClayColliderStyle.Capsule;
+            else style = ClayColliderStyle.DiscComposite;
+        }
+
+        switch (style)
+        {
+            case ClayColliderStyle.Sphere:
+                AddSphere(Vector3.zero, Mathf.Max(across, thick));
+                break;
+
+            case ClayColliderStyle.Capsule:
+                BuildCapsule(Mathf.Min(across, thick), along);
+                break;
+
+            case ClayColliderStyle.Box:
+                New<BoxCollider>("Box").size = new Vector3(across * 2f, thick * 2f, along * 2f);
+                break;
+
+            case ClayColliderStyle.BoxCage:
+                BuildBoxCage(across, thick, along);
+                break;
+
+            case ClayColliderStyle.TaperedComposite:
+                BuildTapered(across, along, square);
+                break;
+
+            default:
+                BuildDisc(across, along);
+                break;
+        }
 
         Finish(scale);
     }

@@ -35,6 +35,16 @@ public class BlobMerger : MonoBehaviour
     [Tooltip("The player's own deformation driver, so it learns about its new siblings.")]
     public DentContactSource ownContactSource;
 
+    [Tooltip("Shape driver, so pickup follows the deformed silhouette rather than a sphere. " +
+             "Found in children if empty.")]
+    public ClayShapeMorph morph;
+
+    [Tooltip("The assembly's actual colliders, used to decide what is within reach.\n\n" +
+             "Asking real geometry rather than recomputing the shape here means pickup " +
+             "cannot disagree with what the player can see and touch. Found on this object " +
+             "if empty; without it the assembly is assumed round.")]
+    public ClayShapeColliders shapeColliders;
+
     [Tooltip("Controller told about the assembly's effective rolling radius.")]
     public ClayCharacterController controller;
 
@@ -115,6 +125,8 @@ public class BlobMerger : MonoBehaviour
         if (ownContactSource == null) ownContactSource = GetComponentInChildren<DentContactSource>();
         if (controller == null) controller = GetComponent<ClayCharacterController>();
         if (squash == null) squash = GetComponentInChildren<SquashStretch>();
+        if (morph == null) morph = GetComponentInChildren<ClayShapeMorph>();
+        if (shapeColliders == null) shapeColliders = GetComponent<ClayShapeColliders>();
 
         EffectiveRadius = ownContactSource != null ? ownContactSource.visualRadius : 0.5f;
 
@@ -148,8 +160,14 @@ public class BlobMerger : MonoBehaviour
 
     void LookForBlobs()
     {
-        Vector3 centre = AssemblyCentre();
-        float reach = EffectiveRadius + LargestBlobRadius() + pickupPadding;
+        // Swept from the shape's own centre, matching where the per-direction test measures
+        // from - the renderer is re-centred as blobs merge, so the body's origin is not it.
+        Vector3 centre = ShapeCentre();
+
+        // The broad sweep uses the furthest the shape reaches anywhere, so nothing within
+        // grabbing distance is missed before the per-direction test runs.
+        float reach = (morph != null ? morph.MaxRadius : EffectiveRadius)
+                      + LargestBlobRadius() + pickupPadding;
 
         int count = Physics.OverlapSphereNonAlloc(centre, reach, overlaps, blobMask,
                                                   QueryTriggerInteraction.Ignore);
@@ -169,22 +187,79 @@ public class BlobMerger : MonoBehaviour
         }
     }
 
-    /// <summary>Radius the assembly presents for pickup, between physical and visible.</summary>
-    float OwnPickupRadius =>
-        Mathf.Lerp(innerRadius,
-                   ownContactSource != null ? ownContactSource.visualRadius : 0.5f,
-                   pickupRadiusBlend);
+    /// <summary>
+    /// How far the assembly reaches toward a point, between its physical collider and its
+    /// visible surface.
+    ///
+    /// Asked per direction, because a single radius is only right while the character is
+    /// round. On a pancake it would sit at the sphere's old reach in every direction, so
+    /// blobs get grabbed out in front of the flat faces where there is nothing to touch -
+    /// an invisible collider, as far as the player can tell.
+    /// </summary>
+    float PickupReachToward(Vector3 worldPoint)
+    {
+        Vector3 centre = ShapeCentre();
+        Vector3 direction = worldPoint - centre;
 
+        float visible = ownContactSource != null ? ownContactSource.visualRadius : 0.5f;
+
+        if (morph != null && direction.sqrMagnitude > 1e-6f)
+            visible = morph.SurfaceDistanceWorld(direction);
+
+        // The physical collider sits inside the visible surface by a fixed proportion, so
+        // the same ratio applies whatever direction this is.
+        float physical = visible * (innerRadius / Mathf.Max(BaseRadius, 0.01f));
+
+        return Mathf.Lerp(physical, visible, pickupRadiusBlend);
+    }
+
+    /// <summary>
+    /// The point the grab shape is measured from.
+    ///
+    /// The shape's own pivot, not the body's origin. The renderer gets re-centred as blobs
+    /// merge, so those two drift apart - and measuring from the wrong one offsets the whole
+    /// silhouette, which reads as grabbing onto a collider that is not there.
+    /// </summary>
+    Vector3 ShapeCentre() => morph != null ? morph.PivotWorld : OwnCentre();
+
+    float BaseRadius => morph != null ? morph.baseRadius
+                      : ownContactSource != null ? ownContactSource.visualRadius
+                      : 0.5f;
+
+    /// <summary>
+    /// Whether a blob is close enough to absorb.
+    ///
+    /// Measured against the assembly's REAL colliders rather than a reconstruction of its
+    /// shape. Every system here used to carry its own copy of the shape maths, and each had
+    /// to be corrected into agreement one at a time - a grab boundary that disagreed with
+    /// the visible silhouette is exactly what that costs. Real geometry cannot disagree with
+    /// itself, and it stays right for composites, absorbed blobs and mid-morph blends alike.
+    /// </summary>
     bool IsTouching(ClayBlob blob)
     {
-        // Blobs already absorbed still present their visible size - they are what the new
-        // blob physically runs into.
-        float nearest = Vector3.Distance(blob.transform.position, OwnCentre())
-                        - blob.visualRadius - OwnPickupRadius;
+        Vector3 blobCentre = blob.transform.position;
+
+        if (shapeColliders != null && shapeColliders.Pieces.Count > 0)
+        {
+            // Surface to surface: the collider gap out to the visible silhouette, then the
+            // blob's own radius.
+            float toCollider = shapeColliders.DistanceToSurface(blobCentre);
+
+            // The visible surface sits outside the collider by design - that gap is the sink
+            // the dent effect flattens - so pickup follows it rather than the collision.
+            float visualGap = toCollider * Mathf.Lerp(1f, 1f / shapeColliders.VisualOverCollider,
+                                                      pickupRadiusBlend);
+
+            return visualGap - blob.visualRadius <= pickupPadding;
+        }
+
+        // No shape colliders: fall back to measuring against a sphere.
+        float nearest = Vector3.Distance(blobCentre, ShapeCentre())
+                        - blob.visualRadius - PickupReachToward(blobCentre);
 
         for (int i = 0; i < merged.Count; i++)
         {
-            float gap = Vector3.Distance(blob.transform.position, merged[i].transform.position)
+            float gap = Vector3.Distance(blobCentre, merged[i].transform.position)
                         - blob.visualRadius - merged[i].visualRadius;
 
             if (gap < nearest) nearest = gap;

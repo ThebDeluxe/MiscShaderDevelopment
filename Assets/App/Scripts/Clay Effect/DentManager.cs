@@ -184,6 +184,17 @@ public class DentManager : MonoBehaviour
     float sinceLastStamp;
 
     public RenderTexture CurrentDentMap => aIsCurrent ? rtA : rtB;
+
+    /// <summary>
+    /// The stamp pass's own material instance.
+    ///
+    /// Exposed so a shape driver can push its state here as well: the stamp measures each
+    /// vertex against nearby surfaces, so it has to warp the vertex the same way the
+    /// character shader does, or dents are computed for the original mesh and applied to a
+    /// deformed one.
+    /// </summary>
+    public Material StampInstance => stampInstance;
+
     public int ActiveDentCount => active.Count;
 
     public static void Register(DentSource s)

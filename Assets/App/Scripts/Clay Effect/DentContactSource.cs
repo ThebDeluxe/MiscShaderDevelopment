@@ -30,8 +30,14 @@ public class DentContactSource : MonoBehaviour
 {
     [Header("Detection")]
     [Tooltip("Radius of the VISIBLE mesh. Surfaces within this distance start flattening " +
-             "the character, by however far the mesh overlaps them.")]
+             "the character, by however far the mesh overlaps them.\n\n" +
+             "Used as-is only while the character is a plain sphere - with a Shape Morph " +
+             "driving it, the reach is asked of that instead, per direction.")]
     public float visualRadius = 0.7f;
+
+    [Tooltip("Shape driver, so detection follows the deformed silhouette rather than a " +
+             "sphere. Found in children if empty; without one the character is assumed round.")]
+    public ClayShapeMorph shapeMorph;
 
     [Tooltip("Local offset of the character's centre from this transform.")]
     public Vector3 centreOffset = Vector3.zero;
@@ -300,6 +306,7 @@ public class DentContactSource : MonoBehaviour
 
         if (owner == null) owner = GetComponentInParent<DentManager>();
         if (ownBody == null) ownBody = GetComponentInParent<Rigidbody>();
+        if (shapeMorph == null) shapeMorph = GetComponentInChildren<ClayShapeMorph>();
 
         EnsureDirections();
 
@@ -351,7 +358,7 @@ public class DentContactSource : MonoBehaviour
         Vector3 centre = transform.TransformPoint(centreOffset);
         float mergeDot = Mathf.Cos(mergeAngle * Mathf.Deg2Rad);
 
-        int count = Physics.OverlapSphereNonAlloc(centre, visualRadius, overlaps,
+        int count = Physics.OverlapSphereNonAlloc(centre, MaxReach, overlaps,
                                                   surfaceMask, QueryTriggerInteraction.Ignore);
 
         bool needsRaycastPass = false;
@@ -699,11 +706,31 @@ public class DentContactSource : MonoBehaviour
         samples++;
     }
 
+    /// <summary>
+    /// How far the visible surface reaches in a world direction.
+    ///
+    /// A single radius is only right while the character is round. On a pancake the rim
+    /// reaches half again as far as the sphere did while the flat faces sit at a quarter of
+    /// it - so a fixed radius misses the rim entirely, giving no contacts when rolling on
+    /// edge, and reports a large false overlap against the faces.
+    /// </summary>
+    float ReachAlong(Vector3 worldDirection)
+    {
+        return shapeMorph != null ? shapeMorph.SurfaceDistanceWorld(worldDirection) : visualRadius;
+    }
+
+    /// <summary>Furthest the surface reaches in any direction, for the broad overlap test.</summary>
+    float MaxReach => shapeMorph != null ? shapeMorph.MaxRadius : visualRadius;
+
     void ProbeByRays(Vector3 centre, float mergeDot)
     {
         for (int i = 0; i < directions.Length; i++)
         {
-            if (!Physics.Raycast(centre, directions[i], out RaycastHit hit, visualRadius,
+            // Asked per direction, so detection follows the deformed silhouette instead of
+            // a sphere that no longer describes it.
+            float reach = ReachAlong(directions[i]);
+
+            if (!Physics.Raycast(centre, directions[i], out RaycastHit hit, reach,
                                  surfaceMask, QueryTriggerInteraction.Ignore))
                 continue;
 
@@ -715,7 +742,7 @@ public class DentContactSource : MonoBehaviour
                 || hit.collider is CapsuleCollider) continue;
             if (hit.collider is MeshCollider hitMesh && hitMesh.convex) continue;
 
-            float sink = visualRadius - hit.distance;
+            float sink = reach - hit.distance;
             if (sink < minSink) continue;
 
             // hit.normal comes off the triangle and points back toward the ray origin, which

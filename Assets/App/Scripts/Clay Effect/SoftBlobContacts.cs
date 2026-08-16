@@ -32,6 +32,10 @@ public class SoftBlobContacts : MonoBehaviour
     [Tooltip("The character's own deformation driver. Falls back to the merger's.")]
     public DentContactSource ownContactSource;
 
+    [Tooltip("Shape driver, so the own-body spring can be skipped when the character is not " +
+             "a sphere. Found in children if empty.")]
+    public ClayShapeMorph morph;
+
     [Header("Spring")]
     [Tooltip("Push per metre of EXCESS overlap, as acceleration.\n\n" +
              "A supplement to the solver, so keep it modest - the colliders are still doing " +
@@ -68,6 +72,7 @@ public class SoftBlobContacts : MonoBehaviour
         if (body == null) body = GetComponent<Rigidbody>();
         if (merger == null) merger = GetComponent<BlobMerger>();
         if (ownContactSource == null && merger != null) ownContactSource = merger.ownContactSource;
+        if (morph == null) morph = GetComponentInChildren<ClayShapeMorph>();
     }
 
     void FixedUpdate()
@@ -76,7 +81,7 @@ public class SoftBlobContacts : MonoBehaviour
 
         debugPushes.Clear();
 
-        if (includeOwnBody && ownContactSource != null && merger.controller != null)
+        if (includeOwnBody && ownContactSource != null && merger.controller != null && OwnBodyIsSphere())
         {
             // The character's mesh is MEANT to sink by the gap between its visible size and
             // its collider - that is what the dent effect flattens. Only overlap beyond
@@ -101,14 +106,27 @@ public class SoftBlobContacts : MonoBehaviour
     }
 
     /// <summary>
+    /// Whether the own-body spring can be trusted right now.
+    ///
+    /// Its rest overlap is worked out from a SPHERE - visible radius minus collider radius -
+    /// and DentContactSource measures sink the same way. Once the character morphs, neither
+    /// holds: a pancake's collider sits far closer to the ground than a 0.7 sphere would, so
+    /// the reported sink is much larger than the rest value, and the leftover reads as a
+    /// permanent intrusion. The resulting push is close enough to gravity to leave the
+    /// character drifting down instead of falling - worse the flatter it gets.
+    /// </summary>
+    bool OwnBodyIsSphere()
+    {
+        return morph == null || morph.CurrentShape == ClayShape.Sphere;
+    }
+    /// <summary>
     /// Springs the assembly out of whatever this source is overlapping, beyond the depth it
     /// is supposed to sit at.
     ///
     /// That subtraction is the whole trick. The dent system reports how far the VISIBLE mesh
     /// overlaps a surface, and it is built to overlap - the mesh is deliberately larger than
     /// the collider, and the difference is the sink the dent flattens. Treating that as
-    /// penetration to escape means pushing constantly against the ground, which floats the
-    /// character like a balloon and shoves it sideways off anything nearby.
+    /// penetration to escape means pushing constantly against the ground.
     ///
     /// Sibling overlaps are already filtered out by the source: they share our Rigidbody,
     /// so pushing away from one is pushing away from ourselves.

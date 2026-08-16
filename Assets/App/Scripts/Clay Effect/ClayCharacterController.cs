@@ -64,15 +64,23 @@ public class ClayCharacterController : MonoBehaviour
     [SerializeField] private ClayShapeMorph shapeMorph;
 
     [Header("Contact Softness")]
-    [Tooltip("How fast the solver may push the assembly out of something it overlaps, in " +
-             "metres per second.\n\n" +
-             "This is the softness dial for a LUMPY assembly. Unity's default is effectively " +
-             "unlimited, so an attached blob catching an edge is ejected instantly and reads " +
-             "as a hard bump. Low values resolve the same overlap over several frames, which " +
-             "reads as clay giving way - and unlike making the collider a trigger, the " +
-             "contact stays real, so friction and support are untouched.\n\n" +
-             "1 to 3 is soft. 0 disables the limit.")]
-    [SerializeField] private float maxDepenetrationSpeed = 2f;
+    [Tooltip("How the body is tested for collisions.\n\n" +
+             "Discrete only checks where things ARE each step, so a thin collider moving " +
+             "fast can be one side of a floor on one step and the other side on the next, " +
+             "never touching it. A pancake is thin, so it falls through. Continuous " +
+             "Speculative sweeps instead, and handles rotation as well - which matters here, " +
+             "since a flat shape rolling on its edge moves fast without the body's centre " +
+             "moving much at all.")]
+    [SerializeField] private CollisionDetectionMode collisionDetection =
+        CollisionDetectionMode.ContinuousSpeculative;
+
+    [Tooltip("How fast the solver may push the body out of something it overlaps, in metres " +
+             "per second.\n\n" +
+             "Low values soften a lumpy assembly rolling over things, but set too low they " +
+             "also stop it escaping a floor it has sunk into - so it settles slowly, or " +
+             "keeps sinking. Raise it if shapes drift downward instead of resting.\n\n" +
+             "0 disables the limit.")]
+    [SerializeField] private float maxDepenetrationSpeed = 6f;
 
     [Tooltip("Distance at which contacts start being generated. Slightly larger than the " +
              "default gives the solver more warning, so it eases into a contact instead of " +
@@ -292,11 +300,15 @@ public class ClayCharacterController : MonoBehaviour
             if (positionBody.interpolation == RigidbodyInterpolation.None)
                 positionBody.interpolation = RigidbodyInterpolation.Interpolate;
 
-            // Softens how a lumpy assembly rolls over things. The default is effectively
-            // unlimited, which is what makes an attached blob catching an edge feel like a
-            // hard bump rather than clay giving way.
+            // Softens how a lumpy assembly rolls over things. Kept well above the very low
+            // values that feel softest, because the same limit governs escaping a surface
+            // the body has sunk into - too low and a thin shape settles slowly or keeps
+            // sinking rather than resting on the floor.
             if (maxDepenetrationSpeed > 0f)
                 positionBody.maxDepenetrationVelocity = maxDepenetrationSpeed;
+
+            // Thin shapes need sweeping rather than sampling, or they pass through floors.
+            positionBody.collisionDetectionMode = collisionDetection;
         }
 
         if (rollingObject == null)

@@ -5,6 +5,11 @@ Shader "Custom/DentStampRaw"
         _PrevDentMap ("Prev Dent Map", 2D) = "black" {}
         _Decay ("Decay", Range(0,1)) = 0.98
 
+        // Shape state, mirrored from the character material so dents are measured against
+        // the deformed surface rather than the original mesh.
+        _ShapeAmount ("Shape Amount", Float) = 0
+        _ShapeSpread ("Shape Spread", Float) = 1
+
         // Extra decay proportional to how deep a dent is, so deep dents do not linger
         // long after shallow ones have faded.
         _DecayDepthBias ("Decay Depth Bias", Float) = 0
@@ -36,10 +41,23 @@ Shader "Custom/DentStampRaw"
             #pragma target 3.0
 
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
+            #include "Assets/App/Art/Shaders/HLSL/ClayShape.hlsl"
             #include "Assets/App/Art/Shaders/HLSL/DentStamp.hlsl"
 
             TEXTURE2D(_PrevDentMap);
             SAMPLER(sampler_PrevDentMap);
+
+            // The same shape the character shader is drawing with. Dents have to be measured
+            // against the DEFORMED surface: taking the raw mesh vertex instead computes them
+            // for where a sphere's surface was, then the character shader applies them to a
+            // pancake - so the deformation lands nowhere near the contact and the mesh sails
+            // straight through it.
+            float3 _ShapeAxis;
+            float3 _ShapePivot;
+            float3 _ShapeSize;
+            float4 _ShapeParams;
+            float _ShapeSpread;
+            float _ShapeAmount;
 
             float _Decay;
             float _DecayDepthBias;
@@ -70,7 +88,14 @@ Shader "Custom/DentStampRaw"
             {
                 Varyings OUT;
 
-                OUT.worldPos = TransformObjectToWorld(IN.positionOS);
+                // Shaped first, so the world position measured against surfaces is where the
+                // vertex is actually drawn rather than where it started.
+                float3 shapedOS;
+                ApplyClayShape_float(IN.positionOS, _ShapeAxis, _ShapePivot,
+                                     _ShapeSize, _ShapeParams, _ShapeSpread, _ShapeAmount,
+                                     shapedOS);
+
+                OUT.worldPos = TransformObjectToWorld(shapedOS);
                 // The rim bulge follows the surface, so it needs the vertex's own normal.
                 OUT.worldNormal = normalize(TransformObjectToWorldNormal(IN.normalOS));
 

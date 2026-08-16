@@ -144,6 +144,18 @@ public class DentContactSource : MonoBehaviour
     [Tooltip("Multiplier on DentManager's decay rate for dents these contacts create.")]
     [Range(0f, 5f)] public float decayMultiplier = 2f;
 
+    [Header("Idle")]
+    [Tooltip("Skip the probe entirely when nothing is within reach.\n\n" +
+             "The broad overlap test is one cheap query; the probe behind it is dozens of " +
+             "raycasts plus a surface lookup per direction. Most objects in a scene are " +
+             "touching nothing at any given moment, so checking first and stopping is the " +
+             "largest saving available here.")]
+    public bool skipWhenNothingNear = true;
+
+    [Tooltip("Seconds of probing after the last surface leaves range, so tracked surfaces " +
+             "finish fading out instead of vanishing.")]
+    public float idleGraceTime = 0.5f;
+
     [Header("Debug")]
     public bool drawGizmos = true;
 
@@ -247,6 +259,12 @@ public class DentContactSource : MonoBehaviour
     Vector3[] directions;
     int builtDirectionCount;
     Rigidbody ownBody;
+    float lastNearTime = -999f;
+
+    // Reach per sample direction, refreshed once per probe rather than per ray. Each lookup
+    // walks every collider piece, so asking inside the ray loop meant repeating that work
+    // for directions whose answer had not changed.
+    float[] reachCache;
 
     static readonly ProfilerMarker MarkerProbe = new ProfilerMarker("DentContact.Probe");
     static readonly ProfilerMarker MarkerTrack = new ProfilerMarker("DentContact.Track");
@@ -318,20 +336,68 @@ public class DentContactSource : MonoBehaviour
 
         EnsureDirections();
 
+        // One cheap query decides whether the expensive one runs at all.
+        if (!AnythingNear())
+        {
+            using (MarkerTrack.Auto()) TrackSurfaces();
+            using (MarkerApply.Auto()) ApplyToSources();
+
+            LogExtentsIfDue();
+            return;
+        }
+
         using (MarkerProbe.Auto()) Probe();
         using (MarkerTrack.Auto()) TrackSurfaces();
         using (MarkerApply.Auto()) ApplyToSources();
 
-        if (logExtents && Time.time >= nextLogTime)
+        LogExtentsIfDue();
+    }
+
+    /// <summary>
+    /// Whether any surface is close enough to be worth probing for.
+    ///
+    /// A single overlap test against the furthest the shape reaches. The probe behind it is
+    /// dozens of raycasts plus a per-direction surface lookup that walks every collider
+    /// piece, so for an object touching nothing - which is most of them, most of the time -
+    /// this turns the whole per-frame cost into one query.
+    ///
+    /// Tracking and application still run, so surfaces already found fade out properly
+    /// rather than disappearing the moment the last one leaves range.
+    /// </summary>
+    bool AnythingNear()
+    {
+        if (!skipWhenNothingNear) return true;
+
+        Vector3 centre = transform.TransformPoint(centreOffset);
+
+        int count = Physics.OverlapSphereNonAlloc(centre, MaxReach, overlaps,
+                                                  surfaceMask, QueryTriggerInteraction.Ignore);
+
+        for (int i = 0; i < count; i++)
         {
-            nextLogTime = Time.time + 1f;
-            for (int i = 0; i < tracked.Count; i++)
-            {
-                Tracked s = tracked[i];
-                Debug.Log($"{name} surface {i}: axis {s.pressAxis}, " +
-                          $"X [{s.minX:0.000}, {s.maxX:0.000}]  Y [{s.minY:0.000}, {s.maxY:0.000}], " +
-                          $"sink {s.sink:0.000}, weight {s.weight:0.00}", this);
-            }
+            if (overlaps[i] == null) continue;
+            if (ownBody != null && overlaps[i].attachedRigidbody == ownBody) continue;
+
+            lastNearTime = Time.time;
+            return true;
+        }
+
+        // Keep going briefly, so anything already tracked finishes fading.
+        return Time.time - lastNearTime <= idleGraceTime;
+    }
+
+    void LogExtentsIfDue()
+    {
+        if (!logExtents || Time.time < nextLogTime) return;
+
+        nextLogTime = Time.time + 1f;
+
+        for (int i = 0; i < tracked.Count; i++)
+        {
+            Tracked s = tracked[i];
+            Debug.Log($"{name} surface {i}: axis {s.pressAxis}, " +
+                      $"X [{s.minX:0.000}, {s.maxX:0.000}]  Y [{s.minY:0.000}, {s.maxY:0.000}], " +
+                      $"sink {s.sink:0.000}, weight {s.weight:0.00}", this);
         }
     }
 
@@ -752,11 +818,18 @@ public class DentContactSource : MonoBehaviour
 
     void ProbeByRays(Vector3 centre, float mergeDot)
     {
+        // Reach is resolved once per direction up front. Each lookup walks every collider
+        // piece, and a cone can be nearly thirty of them, so asking inside the loop repeated
+        // that work for every ray.
+        if (reachCache == null || reachCache.Length != directions.Length)
+            reachCache = new float[directions.Length];
+
+        for (int i = 0; i < directions.Length; i++)
+            reachCache[i] = ReachAlong(directions[i], centre);
+
         for (int i = 0; i < directions.Length; i++)
         {
-            // Asked per direction, so detection follows the real silhouette instead of a
-            // sphere that no longer describes it.
-            float reach = ReachAlong(directions[i], centre);
+            float reach = reachCache[i];
 
             if (!Physics.Raycast(centre, directions[i], out RaycastHit hit, reach,
                                  surfaceMask, QueryTriggerInteraction.Ignore))

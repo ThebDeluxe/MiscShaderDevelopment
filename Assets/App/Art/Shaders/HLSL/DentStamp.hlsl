@@ -18,11 +18,10 @@
 //   Plane             : flat right to its edge, no rim
 //
 // ISLAND RIGIDITY
-// Per-vertex pressing crushes the relief of separate shells: a decoration sitting
-// proud of a body gets scaled toward the same contact plane, so it sinks into it.
-// To avoid that, DentManager evaluates the press once per mesh island (on the CPU)
-// and uploads the result. The shader blends between the per-vertex press and that
-// single rigid push.
+// Removed. It blended each vertex's own press against a single rigid push per mesh island,
+// so a decoration would not be crushed into whatever it sat on. Held at zero in practice,
+// and carrying it cost a uniform array of 32 vectors - real budget on WebGL - for a lerp
+// that always resolved to the per-vertex value anyway.
 //
 // Data layout (filled by DentManager):
 //   _DentPos[i]    : xyz = world position of the contact point, w = shape id
@@ -49,7 +48,6 @@
 //                    punch pressed INTO the mesh piles material up behind itself, but a
 //                    curved surface the mesh RESTS ON has -Z pointing into the surface,
 //                    where pushing material would drive it straight through.
-//   _IslandPush[j] : xyz = OBJECT space rigid push for island j, w = rigidity 0..1
 //
 // Shape ids: 0 = Capsule, 1 = Cylinder, 2 = Square, 3 = Plane.
 //
@@ -86,7 +84,6 @@
 // adds a magnitude-dependent term so deeper dents fade faster and the two even out.
 
 #define DENT_MAX   16
-#define ISLAND_MAX 32
 
 #define DENT_SHAPE_CAPSULE  0
 #define DENT_SHAPE_CYLINDER 1
@@ -100,9 +97,6 @@ float4 _DentParams[DENT_MAX];
 float4 _DentBulge[DENT_MAX];
 float4 _DentDecay[DENT_MAX];
 int    _DentCount;
-
-float4 _IslandPush[ISLAND_MAX];
-int    _IslandCount;
 
 // --------------------------------------------------------------------
 // Lateral distance from the press axis, per cross-section.
@@ -346,19 +340,12 @@ float3 EvaluateDentWorld(float3 WorldPos, float3 WorldNormal, out float DecayMul
 
 // --------------------------------------------------------------------
 // Final displacement for a vertex, in OBJECT space.
-// IslandId comes from the z component of the index UV.
 // --------------------------------------------------------------------
-void CalculateDentVector_float(float3 WorldPos, float3 WorldNormal, float IslandId,
+void CalculateDentVector_float(float3 WorldPos, float3 WorldNormal,
                                out float3 Displacement, out float DecayMul)
 {
-    float3 perVertex = TransformWorldToObjectDir(
+    Displacement = TransformWorldToObjectDir(
         EvaluateDentWorld(WorldPos, WorldNormal, DecayMul), false);
-
-    int id = clamp((int)round(IslandId), 0, ISLAND_MAX - 1);
-    float4 island = (id < _IslandCount) ? _IslandPush[id] : float4(0, 0, 0, 0);
-
-    // island.xyz is already object space; island.w is this island's rigidity.
-    Displacement = lerp(perVertex, island.xyz, saturate(island.w));
 }
 
 #endif // DENTSTAMP_INCLUDED

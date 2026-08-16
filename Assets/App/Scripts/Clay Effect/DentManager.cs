@@ -55,19 +55,17 @@ public class DentManager : MonoBehaviour
     [Tooltip("Extra slack on the bounds test, in world units.")]
     public float boundsPadding = 0.05f;
 
-    [Header("Island Rigidity")]
-    [Tooltip("How much disconnected mesh parts move as a rigid block instead of being\n" +
-             "pressed per-vertex. 1 keeps a part's shape and its offset from whatever it\n" +
-             "sits on; 0 is the old per-vertex behaviour.")]
-    [Range(0f, 1f)] public float islandRigidity = 1f;
+    [Header("Idle")]
+    [Tooltip("Skip the whole update when nothing is touching this object and its dents have " +
+             "faded.\n\n" +
+             "The largest saving available at scale: in a scene of fifty blobs most are " +
+             "sitting still touching nothing, and without this each one still samples, " +
+             "stamps and uploads every frame to produce the same texture it already had.")]
+    public bool skipWhenIdle = true;
 
-    [Tooltip("Islands with a local-space radius at or below this are FULLY rigid: the whole " +
-             "piece translates by one push value and does not bend at all.")]
-    public float rigidBelowRadius = 0.1f;
-
-    [Tooltip("Islands at or above this local-space radius are pressed fully per-vertex, so " +
-             "they bend to the stamp. Between the two radii rigidity ramps smoothly.")]
-    public float flexibleAboveRadius = 0.35f;
+    [Tooltip("Seconds of stamping after the last contact ends, so existing dents finish " +
+             "decaying rather than freezing part-faded.")]
+    public float idleGraceTime = 2f;
 
     [Header("Debug")]
     [Tooltip("Push EVERY vertex along object-space up, ignoring dent sources.\n" +
@@ -108,8 +106,6 @@ public class DentManager : MonoBehaviour
     static readonly int DecayDepthBiasID = Shader.PropertyToID("_DecayDepthBias");
     static readonly int FlipYID         = Shader.PropertyToID("_FlipY");
     static readonly int DebugStampAllID = Shader.PropertyToID("_DebugStampAll");
-    static readonly int IslandPushID    = Shader.PropertyToID("_IslandPush");
-    static readonly int IslandCountID   = Shader.PropertyToID("_IslandCount");
     static readonly int DentTextureID   = Shader.PropertyToID(DentTextureProperty);
 
     // Per-phase markers. Deep profiling distorts call-heavy code badly, so these give a
@@ -118,7 +114,6 @@ public class DentManager : MonoBehaviour
     static readonly ProfilerMarker MarkerCacheSamples = new ProfilerMarker("Dent.CacheSamples");
     static readonly ProfilerMarker MarkerPressDepths = new ProfilerMarker("Dent.PressDepths");
     static readonly ProfilerMarker MarkerDentArrays = new ProfilerMarker("Dent.BuildDentArrays");
-    static readonly ProfilerMarker MarkerIslands = new ProfilerMarker("Dent.BuildIslands");
     static readonly ProfilerMarker MarkerUpload = new ProfilerMarker("Dent.UploadAndDraw");
 
     /// <summary>Every enabled source in the scene. Each manager filters this down itself.</summary>
@@ -171,8 +166,6 @@ public class DentManager : MonoBehaviour
     readonly Vector4[] dentDecay  = new Vector4[MAX_DENTS];
     /// <summary>Deepest penetration each active source achieves anywhere on the mesh.</summary>
     readonly float[] pressDepth = new float[MAX_DENTS];
-    // xyz = OBJECT space rigid push for this island, w = rigidity 0..1
-    readonly Vector4[] islandPush = new Vector4[MAX_ISLANDS];
 
     DentVertexUVGenerator generator;
     Material stampInstance;      // our own copy, so managers never fight over uniforms
@@ -376,6 +369,11 @@ public class DentManager : MonoBehaviour
         if (paused) return;
 
         using (MarkerCollect.Auto()) CollectActiveSources();
+
+        // Nothing touching, nothing left to fade: the stamp would reproduce the texture it
+        // already has, so everything below is skipped.
+        if (!NeedsUpdate()) return;
+
         using (MarkerCacheSamples.Auto()) CacheSampleWorldPositions();
         using (MarkerPressDepths.Auto()) ComputePressDepths();
         ResolveDrivers();
@@ -384,7 +382,6 @@ public class DentManager : MonoBehaviour
         RenderTexture dst = aIsCurrent ? rtB : rtA;
 
         using (MarkerDentArrays.Auto()) BuildDentArrays();
-        using (MarkerIslands.Auto()) BuildIslandArray();
 
         MarkerUpload.Begin();
 
@@ -397,18 +394,6 @@ public class DentManager : MonoBehaviour
         stampInstance.SetVectorArray(DentBulgeID, dentBulge);
         stampInstance.SetVectorArray(DentDecayID, dentDecay);
         stampInstance.SetInt(DentCountID, ActiveDentCount);
-
-        // Skipping the count is enough to disable the blend: the shader only reads
-        // _IslandPush for ids below it, so the array upload can be skipped too.
-        if (islandRigidity > 0f)
-        {
-            stampInstance.SetVectorArray(IslandPushID, islandPush);
-            stampInstance.SetInt(IslandCountID, Mathf.Min(generator.IslandCount, MAX_ISLANDS));
-        }
-        else
-        {
-            stampInstance.SetInt(IslandCountID, 0);
-        }
         stampInstance.SetTexture(PrevTexID, src);
         stampInstance.SetFloat(DecayID, CurrentDecay);
         stampInstance.SetFloat(DecayDepthBiasID, Mathf.Max(decayDepthBias, 0f));
@@ -584,61 +569,34 @@ public class DentManager : MonoBehaviour
     }
 
     /// <summary>
-    /// Evaluates the press once per mesh island so the stamp shader can move whole
-    /// disconnected parts rigidly.
+    /// Whether this object still needs stamping.
     ///
-    /// Each island is sampled at several points and the STRONGEST push wins. A single
-    /// centroid is not enough: on a toroid the centroid sits in the hole, outside the
-    /// mesh, and would report no penetration while the ring itself is fully pressed.
+    /// With nothing touching it and no dents left to fade, the stamp would reproduce the
+    /// texture it already has - so the sampling, the draw and the uniform uploads can all
+    /// be skipped. That is most objects most of the time once there are more than a handful
+    /// in a scene, which makes it the largest saving available here: everything else trims
+    /// a cost that an idle object should not be paying at all.
+    ///
+    /// The grace period keeps it running briefly after the last contact ends, so dents
+    /// finish decaying instead of freezing part-faded.
     /// </summary>
-    void BuildIslandArray()
+    bool NeedsUpdate()
     {
-        // At zero rigidity the shader does lerp(perVertex, islandPush, 0), which is exactly
-        // perVertex - so every push computed here would be multiplied out to nothing. This
-        // is the most expensive pass in the system, so it is worth not running it at all.
-        if (islandRigidity <= 0f) return;
+        if (!skipWhenIdle) return true;
 
-        int count = Mathf.Min(generator.IslandCount, MAX_ISLANDS);
-
-        // One matrix read, rather than a transform call per island.
-        Matrix4x4 worldToLocal = targetRenderer.transform.worldToLocalMatrix;
-
-        for (int i = 0; i < count; i++)
+        if (active.Count > 0 || debugStampAll)
         {
-            Vector3 bestPushWS = Vector3.zero;
-            float bestMagSq = 0f;
-
-            int from = sampleStart[i];
-            int to = sampleStart[i + 1];
-
-            for (int k = from; k < to; k++)
-            {
-                Vector3 pushWS = EvaluatePressWorld(sampleWorld[k]);
-                float magSq = pushWS.sqrMagnitude;
-                if (magSq > bestMagSq)
-                {
-                    bestMagSq = magSq;
-                    bestPushWS = pushWS;
-                }
-            }
-
-            Vector3 pushOS = worldToLocal.MultiplyVector(bestPushWS);
-
-            // Rigidity ramps with island size: small detail parts move as a block, large
-            // ones bend to the stamp, and everything between blends rather than snapping
-            // from one behaviour to the other.
-            float radius = generator.IslandRadii[i];
-            float sizeT = Mathf.InverseLerp(rigidBelowRadius,
-                                            Mathf.Max(flexibleAboveRadius, rigidBelowRadius + 1e-4f),
-                                            radius);
-            float rigidity = islandRigidity * (1f - Mathf.SmoothStep(0f, 1f, sizeT));
-
-            islandPush[i] = new Vector4(pushOS.x, pushOS.y, pushOS.z, rigidity);
+            lastActiveTime = Time.time;
+            return true;
         }
 
-        for (int i = count; i < MAX_ISLANDS; i++)
-            islandPush[i] = Vector4.zero;
+        // Permanent dents never finish fading, so there is nothing to wait for.
+        if (decayPerSecond <= 0f) return false;
+
+        return Time.time - lastActiveTime <= idleGraceTime;
     }
+
+    float lastActiveTime = -999f;
 
     // --------------------------------------------------------------------
     // CPU mirror of the press maths in DentStamp.hlsl.
@@ -966,15 +924,9 @@ public class DentManager : MonoBehaviour
 
         Transform tr = targetRenderer.transform;
         Vector3 worldNormal = tr.TransformDirection(localNormal).normalized;
-        Vector3 perVertexOS = tr.InverseTransformDirection(
+
+        return tr.InverseTransformDirection(
             EvaluateDentWorld(tr.TransformPoint(localPos), worldNormal, out decayMul));
-
-        if (islandId < 0 || islandId >= MAX_ISLANDS || islandRigidity <= 0f) return perVertexOS;
-
-        Vector4 island = islandPush[islandId];
-        return Vector3.Lerp(perVertexOS,
-                            new Vector3(island.x, island.y, island.z),
-                            Mathf.Clamp01(island.w));
     }
 
     /// <summary>Same base decay factor the stamp shader uses this frame.</summary>

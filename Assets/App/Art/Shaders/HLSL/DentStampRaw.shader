@@ -115,7 +115,7 @@ Shader "Custom/DentStampRaw"
             {
                 float3 disp;
                 float  dispDecayMul;
-                CalculateDentVector_float(IN.worldPos, IN.worldNormal, IN.islandId, disp, dispDecayMul);
+                CalculateDentVector_float(IN.worldPos, IN.worldNormal, disp, dispDecayMul);
 
                 // Debug override: push everything along object-space up.
                 if (_DebugStampAll > 0.5)

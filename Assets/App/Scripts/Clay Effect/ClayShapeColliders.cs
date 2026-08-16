@@ -131,6 +131,38 @@ public class ClayShapeColliders : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Furthest any piece reaches from the shape's centre.
+    ///
+    /// Taken from the pieces themselves rather than the shape definition, so it stays right
+    /// for a composite whose parts extend past the nominal extents.
+    /// </summary>
+    public float MaxReach
+    {
+        get
+        {
+            if (pieces.Count == 0) return morph != null ? morph.baseRadius : 1f;
+
+            Vector3 centre = holder != null ? holder.position : transform.position;
+            float furthest = 0f;
+
+            for (int i = 0; i < pieces.Count; i++)
+            {
+                if (pieces[i] == null || !pieces[i].enabled) continue;
+
+                Bounds b = pieces[i].bounds;
+                float reach = Vector3.Distance(centre, b.center) + b.extents.magnitude;
+
+                if (reach > furthest) furthest = reach;
+            }
+
+            return Mathf.Max(furthest, 0.01f);
+        }
+    }
+
+    /// <summary>The point the shape is built around, in world space.</summary>
+    public Vector3 Centre => holder != null ? holder.position : transform.position;
+
     void Start()
     {
         if (body == null) body = GetComponent<Rigidbody>();

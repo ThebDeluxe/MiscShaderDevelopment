@@ -39,6 +39,13 @@ public class DentContactSource : MonoBehaviour
              "sphere. Found in children if empty; without one the character is assumed round.")]
     public ClayShapeMorph shapeMorph;
 
+    [Tooltip("The character's actual colliders. When set, the reach in each direction is " +
+             "measured against these rather than reconstructed from the shape maths.\n\n" +
+             "Real geometry cannot disagree with what is physically there, and it covers " +
+             "composites and mid-morph blends without any special handling. Found in parents " +
+             "if empty.")]
+    public ClayShapeColliders shapeColliders;
+
     [Tooltip("Local offset of the character's centre from this transform.")]
     public Vector3 centreOffset = Vector3.zero;
 
@@ -307,6 +314,7 @@ public class DentContactSource : MonoBehaviour
         if (owner == null) owner = GetComponentInParent<DentManager>();
         if (ownBody == null) ownBody = GetComponentInParent<Rigidbody>();
         if (shapeMorph == null) shapeMorph = GetComponentInChildren<ClayShapeMorph>();
+        if (shapeColliders == null) shapeColliders = GetComponentInParent<ClayShapeColliders>();
 
         EnsureDirections();
 
@@ -709,26 +717,46 @@ public class DentContactSource : MonoBehaviour
     /// <summary>
     /// How far the visible surface reaches in a world direction.
     ///
-    /// A single radius is only right while the character is round. On a pancake the rim
-    /// reaches half again as far as the sphere did while the flat faces sit at a quarter of
-    /// it - so a fixed radius misses the rim entirely, giving no contacts when rolling on
-    /// edge, and reports a large false overlap against the faces.
+    /// Measured against the REAL colliders where they exist, scaled out to the visible
+    /// silhouette. That gap is deliberate - it is the sink the dent effect flattens - so the
+    /// collider distance times the visual ratio is where the mesh's surface actually is.
+    ///
+    /// Doing it this way rather than recomputing the shape means detection cannot drift out
+    /// of agreement with what the player can see and touch, which is exactly what a private
+    /// copy of the shape maths kept producing.
     /// </summary>
-    float ReachAlong(Vector3 worldDirection)
+    float ReachAlong(Vector3 worldDirection, Vector3 centre)
     {
+        if (shapeColliders != null && shapeColliders.Pieces.Count > 0)
+        {
+            // How far the collider surface sits along this direction, found by measuring at
+            // the furthest point it could be and asking how far short of that it falls.
+            float probe = shapeColliders.MaxReach;
+            Vector3 far = centre + worldDirection.normalized * probe;
+
+            float gap = shapeColliders.DistanceToSurface(far);
+            float colliderReach = Mathf.Max(probe - gap, 0.01f);
+
+            return colliderReach * shapeColliders.VisualOverCollider;
+        }
+
         return shapeMorph != null ? shapeMorph.SurfaceDistanceWorld(worldDirection) : visualRadius;
     }
 
     /// <summary>Furthest the surface reaches in any direction, for the broad overlap test.</summary>
-    float MaxReach => shapeMorph != null ? shapeMorph.MaxRadius : visualRadius;
+    float MaxReach =>
+        shapeColliders != null && shapeColliders.Pieces.Count > 0
+            ? shapeColliders.MaxReach * shapeColliders.VisualOverCollider
+            : shapeMorph != null ? shapeMorph.MaxRadius
+            : visualRadius;
 
     void ProbeByRays(Vector3 centre, float mergeDot)
     {
         for (int i = 0; i < directions.Length; i++)
         {
-            // Asked per direction, so detection follows the deformed silhouette instead of
-            // a sphere that no longer describes it.
-            float reach = ReachAlong(directions[i]);
+            // Asked per direction, so detection follows the real silhouette instead of a
+            // sphere that no longer describes it.
+            float reach = ReachAlong(directions[i], centre);
 
             if (!Physics.Raycast(centre, directions[i], out RaycastHit hit, reach,
                                  surfaceMask, QueryTriggerInteraction.Ignore))

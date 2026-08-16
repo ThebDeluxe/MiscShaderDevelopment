@@ -36,6 +36,13 @@ public class SoftBlobContacts : MonoBehaviour
              "a sphere. Found in children if empty.")]
     public ClayShapeMorph morph;
 
+    [Tooltip("The assembly's actual colliders, used to work out how far the mesh is meant to " +
+             "sink.\n\n" +
+             "Measuring against real geometry rather than assumed radii is what lets the " +
+             "own-body spring work on any shape - reconstructing it from a sphere is why it " +
+             "had to be switched off the moment the character morphed.")]
+    public ClayShapeColliders shapeColliders;
+
     [Header("Spring")]
     [Tooltip("Push per metre of EXCESS overlap, as acceleration.\n\n" +
              "A supplement to the solver, so keep it modest - the colliders are still doing " +
@@ -73,6 +80,7 @@ public class SoftBlobContacts : MonoBehaviour
         if (merger == null) merger = GetComponent<BlobMerger>();
         if (ownContactSource == null && merger != null) ownContactSource = merger.ownContactSource;
         if (morph == null) morph = GetComponentInChildren<ClayShapeMorph>();
+        if (shapeColliders == null) shapeColliders = GetComponent<ClayShapeColliders>();
     }
 
     void FixedUpdate()
@@ -81,13 +89,12 @@ public class SoftBlobContacts : MonoBehaviour
 
         debugPushes.Clear();
 
-        if (includeOwnBody && ownContactSource != null && merger.controller != null && OwnBodyIsSphere())
+        if (includeOwnBody && ownContactSource != null && merger.controller != null)
         {
             // The character's mesh is MEANT to sink by the gap between its visible size and
-            // its collider - that is what the dent effect flattens. Only overlap beyond
-            // that is a real intrusion.
-            float restOverlap = ownContactSource.visualRadius - merger.innerRadius;
-            PushOutOf(ownContactSource, restOverlap, ownBodyScale);
+            // its collider - that is what the dent effect flattens. Only overlap beyond that
+            // is a real intrusion.
+            PushOutOf(ownContactSource, OwnRestOverlap(), ownBodyScale);
         }
 
         var blobs = merger.MergedBlobs;
@@ -106,18 +113,30 @@ public class SoftBlobContacts : MonoBehaviour
     }
 
     /// <summary>
-    /// Whether the own-body spring can be trusted right now.
+    /// How far the character's mesh is supposed to sink, by design.
     ///
-    /// Its rest overlap is worked out from a SPHERE - visible radius minus collider radius -
-    /// and DentContactSource measures sink the same way. Once the character morphs, neither
-    /// holds: a pancake's collider sits far closer to the ground than a 0.7 sphere would, so
-    /// the reported sink is much larger than the rest value, and the leftover reads as a
-    /// permanent intrusion. The resulting push is close enough to gravity to leave the
-    /// character drifting down instead of falling - worse the flatter it gets.
+    /// Taken from the real colliders where they exist: their reach out to the visible
+    /// silhouette IS the intended sink, whatever shape the character currently is. Working
+    /// it out from sphere radii instead is why this had to be switched off the moment the
+    /// character morphed - on a pancake it under-reported the gap badly enough that the
+    /// leftover read as a permanent intrusion, and the spring pushed hard enough to cancel
+    /// most of gravity.
     /// </summary>
-    bool OwnBodyIsSphere()
+    float OwnRestOverlap()
     {
-        return morph == null || morph.CurrentShape == ClayShape.Sphere;
+        if (shapeColliders != null && shapeColliders.Pieces.Count > 0)
+        {
+            // Along the direction it is most likely to be resting on, which is down.
+            Vector3 centre = shapeColliders.Centre;
+            float probe = shapeColliders.MaxReach;
+
+            float gap = shapeColliders.DistanceToSurface(centre + Vector3.down * probe);
+            float colliderReach = Mathf.Max(probe - gap, 0.01f);
+
+            return colliderReach * (shapeColliders.VisualOverCollider - 1f);
+        }
+
+        return ownContactSource.visualRadius - merger.innerRadius;
     }
     /// <summary>
     /// Springs the assembly out of whatever this source is overlapping, beyond the depth it

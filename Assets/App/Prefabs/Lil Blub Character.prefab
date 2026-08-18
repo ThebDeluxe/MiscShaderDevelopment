@@ -58,9 +58,11 @@ MonoBehaviour:
   rimSegments: 16
   discFillBoxes: 3
   coneRings: 3
+  manageTrigger: 1
   pinInertia: 1
   inertiaScale: 1
   drawGizmos: 1
+  logColliders: 0
 --- !u!114 &6588635645056384827
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -76,6 +78,8 @@ MonoBehaviour:
   body: {fileID: 0}
   rollingObject: {fileID: 6625386134798469017}
   ownContactSource: {fileID: 8682507769724385475}
+  morph: {fileID: 0}
+  shapeColliders: {fileID: 0}
   controller: {fileID: 2975038467675803792}
   squash: {fileID: 0}
   blobMask:
@@ -109,9 +113,10 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::SoftBlobContacts
   body: {fileID: 0}
   merger: {fileID: 6588635645056384827}
-  includeOwnBody: 1
+  includeOwnBody: 0
   ownContactSource: {fileID: 0}
   morph: {fileID: 0}
+  shapeColliders: {fileID: 0}
   stiffness: 120
   damping: 12
   maxOverlap: 0.3
@@ -140,6 +145,7 @@ MonoBehaviour:
   damping: 6
   pivotCollider: {fileID: 0}
   pivotLocal: {x: 0, y: 0, z: 0}
+  shapeColliders: {fileID: 0}
   drawGizmos: 1
 --- !u!114 &8682507769724385475
 MonoBehaviour:
@@ -154,6 +160,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DentContactSource
   visualRadius: 0.7
+  shapeMorph: {fileID: 0}
+  shapeColliders: {fileID: 0}
   centreOffset: {x: 0, y: 0, z: 0}
   surfaceMask:
     serializedVersion: 2
@@ -180,6 +188,8 @@ MonoBehaviour:
   bulgeReach: 2
   bulgeClamp: 0.3
   decayMultiplier: 3.75
+  skipWhenNothingNear: 1
+  idleGraceTime: 0.5
   drawGizmos: 1
   drawEdgeProbes: 0
   logExtents: 0
@@ -318,9 +328,8 @@ MonoBehaviour:
   decayDepthBias: 2
   filterSourcesByBounds: 1
   boundsPadding: 0.05
-  islandRigidity: 0
-  rigidBelowRadius: 0.1
-  flexibleAboveRadius: 0.35
+  skipWhenIdle: 1
+  idleGraceTime: 2
   debugStampAll: 0
   overrideFlipY: 0
   flipYValue: 1
@@ -477,6 +486,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::ClayShapeMorph
   targetRenderer: {fileID: 0}
+  dentManager: {fileID: 0}
   pivotLocal: {x: 0, y: 0, z: 0}
   baseRadius: 0.7
   sphere:

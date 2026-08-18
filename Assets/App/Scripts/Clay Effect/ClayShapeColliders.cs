@@ -145,6 +145,47 @@ public class ClayShapeColliders : MonoBehaviour
     }
 
     /// <summary>
+    /// Distance from the shape's centre to its surface, along a world direction.
+    ///
+    /// Cast inward against the pieces rather than measured with ClosestPoint. That
+    /// distinction matters: ClosestPoint called from far away converges on the EXTREME point
+    /// in that direction, so a plank probed diagonally reports its half-diagonal instead of
+    /// where the ray actually leaves the surface - which on a flat shape is several times
+    /// too far.
+    /// </summary>
+    public float SurfaceDistanceAlong(Vector3 worldDirection)
+    {
+        if (pieces.Count == 0) return morph != null ? morph.baseRadius : 1f;
+
+        Vector3 dir = worldDirection.normalized;
+        if (dir.sqrMagnitude < 1e-6f) return MaxReach;
+
+        Vector3 centre = Centre;
+        float start = MaxReach * 2f;
+
+        // From outside, pointing back at the centre, so the first thing hit is the surface
+        // on this side.
+        Vector3 origin = centre + dir * start;
+        var ray = new Ray(origin, -dir);
+
+        float nearest = float.MaxValue;
+
+        for (int i = 0; i < pieces.Count; i++)
+        {
+            if (pieces[i] == null || !pieces[i].enabled) continue;
+
+            // Per collider, so only our own pieces are tested - no layer masks, and nothing
+            // in the world can interfere.
+            if (pieces[i].Raycast(ray, out RaycastHit hit, start * 2f) && hit.distance < nearest)
+                nearest = hit.distance;
+        }
+
+        if (nearest >= float.MaxValue) return MaxReach;
+
+        return Mathf.Max(start - nearest, 0.01f);
+    }
+
+    /// <summary>
     /// Furthest any piece reaches from the shape's centre.
     ///
     /// Taken from the pieces themselves rather than the shape definition, so it stays right
@@ -230,6 +271,11 @@ public class ClayShapeColliders : MonoBehaviour
             // Another Rigidbody's collider is not part of this body at all.
             if (c.attachedRigidbody != body) continue;
             if (!c.enabled) continue;
+
+            // Absorbed blobs manage their own colliders, and those are the whole point of a
+            // lumpy assembly - taking them over leaves nothing holding the blobs up, so the
+            // contact springs end up carrying them and the assembly floats.
+            if (c.GetComponentInParent<ClayBlob>() != null) continue;
 
             // A trigger blocks nothing, so it never holds a shape off the ground - but a
             // sphere-shaped one still reports contact where a plank visibly is not, so it

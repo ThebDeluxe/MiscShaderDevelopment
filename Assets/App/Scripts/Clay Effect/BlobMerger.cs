@@ -99,8 +99,24 @@ public class BlobMerger : MonoBehaviour
     [Tooltip("Seconds a thrown blob cannot be re-absorbed, so it actually gets away.")]
     public float pickupLockSeconds = 0.7f;
 
+    [Header("Reseating")]
+    [Tooltip("How long blobs keep settling onto the surface after a shape change. Should be " +
+             "at least as long as the morph, so they arrive with the mesh rather than " +
+             "before it.")]
+    public float reseatDuration = 0.5f;
+
+    [Tooltip("How far a blob sinks into the surface, as a fraction of its radius.\n\n" +
+             "0 rests it exactly on the surface, edge touching - where pickup would have " +
+             "placed it. 1 sinks it to its centre. Small values read as clay holding on " +
+             "without swallowing it.")]
+    [Range(0f, 1f)] public float seatDepth = 0.3f;
+
     [Header("Debug")]
     public bool drawGizmos = true;
+
+    [Tooltip("Log each reseat, and draw where blobs are being sent. Use this to tell whether " +
+             "reseating is running at all, as against running and landing in the wrong place.")]
+    public bool logReseat = false;
 
     readonly List<ClayBlob> merged = new List<ClayBlob>();
     readonly Collider[] overlaps = new Collider[16];
@@ -109,6 +125,9 @@ public class BlobMerger : MonoBehaviour
     InputAction throwAction;
     bool throwing;
     readonly RaycastHit[] aimHits = new RaycastHit[16];
+    ClayShape lastShape = ClayShape.Sphere;
+    bool reseating;
+    float reseatTimer;
 
     /// <summary>Blobs currently part of the assembly.</summary>
     public int MergedCount => merged.Count;
@@ -156,6 +175,113 @@ public class BlobMerger : MonoBehaviour
         // underneath swings out to the side and back again constantly. A value captured at
         // merge time is wrong within a fraction of a second.
         RefreshGroundProbe();
+
+        // Blobs ride the surface as it changes, rather than jumping to the end of it.
+        if (morph != null)
+        {
+            if (morph.CurrentShape != lastShape)
+            {
+                lastShape = morph.CurrentShape;
+                reseatTimer = 0f;
+                reseating = true;
+
+                if (logReseat)
+                    Debug.Log($"{name}: reseating {merged.Count} blob(s) onto {morph.CurrentShape}. " +
+                              $"Shape colliders: {(shapeColliders != null ? shapeColliders.Pieces.Count : 0)} piece(s).",
+                              this);
+            }
+
+            if (reseating)
+            {
+                reseatTimer += Time.fixedDeltaTime;
+
+                float duration = Mathf.Max(reseatDuration, 0.02f);
+                float t = Mathf.Clamp01(reseatTimer / duration);
+
+                // Eased per step rather than as an absolute progress, so the blob keeps
+                // converging even as the surface underneath it is still moving.
+                RepositionBlobs(1f - Mathf.Exp(-8f * Time.fixedDeltaTime));
+
+                if (t >= 1f) reseating = false;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Puts absorbed blobs back on the surface as the assembly changes shape.
+    ///
+    /// A blob is attached where the surface WAS - stuck to a sphere's flank, say - so when
+    /// that becomes a plank it ends up floating clear of the new silhouette, or swallowed by
+    /// it. Each is moved toward the nearest point on the new shape, keeping roughly the side
+    /// of the assembly it was on.
+    ///
+    /// Eased across the morph rather than snapped, so blobs travel with the surface instead
+    /// of arriving before the mesh does.
+    /// </summary>
+    void RepositionBlobs(float t)
+    {
+        if (shapeColliders == null || shapeColliders.Pieces.Count == 0) return;
+
+        for (int i = 0; i < merged.Count; i++)
+        {
+            ClayBlob blob = merged[i];
+            if (blob == null) continue;
+
+            Vector3 from = blob.transform.position;
+            Vector3 target = SurfaceSeatFor(from, blob.visualRadius);
+
+            blob.transform.position = Vector3.Lerp(from, target, t);
+        }
+
+        // The assembly's balance and reach have both changed with it.
+        RecentrePivot();
+        RefreshRollingRadius();
+    }
+
+    /// <summary>
+    /// Where a blob should sit on the current shape, given roughly where it is now.
+    ///
+    /// Approached from OUTSIDE the shape rather than from the blob's own position, because
+    /// Collider.ClosestPoint hands back the point unchanged when it is already inside - so a
+    /// shape growing around a blob leaves it with nowhere to go and it stays buried. Probing
+    /// from beyond the silhouette always lands on the surface, whichever side the blob
+    /// started.
+    /// </summary>
+    /// <summary>
+    /// How far the VISIBLE surface reaches from the shape's centre, toward a world point.
+    ///
+    /// Taken from the real collider set and scaled out by the shell thickness, so it follows
+    /// whatever the assembly currently is - a plank's length one way and its thinness the
+    /// other - rather than standing in for it with a radius.
+    /// </summary>
+    float VisualReachToward(Vector3 worldPoint)
+    {
+        Vector3 centre = shapeColliders.Centre;
+
+        Vector3 outward = worldPoint - centre;
+        if (outward.sqrMagnitude < 1e-6f) outward = Vector3.up;
+
+        // Cast against the pieces, so this is where the surface actually is in this
+        // direction - not the furthest the shape reaches anywhere, which on a plank or a
+        // pancake is a corner several times further out than the face a blob is resting on.
+        return shapeColliders.SurfaceDistanceAlong(outward) * shapeColliders.VisualOverCollider;
+    }
+
+    Vector3 SurfaceSeatFor(Vector3 worldPoint, float blobRadius)
+    {
+        Vector3 centre = shapeColliders.Centre;
+
+        Vector3 outward = worldPoint - centre;
+        if (outward.sqrMagnitude < 1e-6f) outward = Vector3.up;
+        outward.Normalize();
+
+        // The blob's EDGE meets the surface, so its centre sits a full radius beyond it -
+        // the same place pickup would have put it had it been collected in this shape.
+        // Seating by the centre instead buries the blob by its whole radius before any
+        // embedding is even applied.
+        float seat = VisualReachToward(worldPoint) + blobRadius * (1f - seatDepth);
+
+        return centre + outward * seat;
     }
 
     void LookForBlobs()
@@ -241,16 +367,19 @@ public class BlobMerger : MonoBehaviour
 
         if (shapeColliders != null && shapeColliders.Pieces.Count > 0)
         {
-            // Surface to surface: the collider gap out to the visible silhouette, then the
-            // blob's own radius.
-            float toCollider = shapeColliders.DistanceToSurface(blobCentre);
+            // Distance from the shape's centre to the blob, against how far the shape
+            // actually reaches that way. Both come from the real collider set, so this
+            // follows a plank's length and its thinness rather than splitting the
+            // difference into a radius.
+            float toBlob = Vector3.Distance(blobCentre, shapeColliders.Centre);
 
-            // The visible surface sits outside the collider by design - that gap is the sink
-            // the dent effect flattens - so pickup follows it rather than the collision.
-            float visualGap = toCollider * Mathf.Lerp(1f, 1f / shapeColliders.VisualOverCollider,
-                                                      pickupRadiusBlend);
+            // Physical or visible, per the blend. The collider sits inside the mesh by
+            // design, and pickup can be aimed at either.
+            float visual = VisualReachToward(blobCentre);
+            float physical = visual / Mathf.Max(shapeColliders.VisualOverCollider, 0.01f);
+            float reach = Mathf.Lerp(physical, visual, pickupRadiusBlend);
 
-            return visualGap - blob.visualRadius <= pickupPadding;
+            return toBlob - reach - blob.visualRadius <= pickupPadding;
         }
 
         // No shape colliders: fall back to measuring against a sphere.
@@ -599,7 +728,20 @@ public class BlobMerger : MonoBehaviour
         Gizmos.color = new Color(1f, 0.5f, 0.9f, 0.9f);
         Gizmos.DrawWireSphere(AssemblyCentre(), 0.08f);
 
-        Gizmos.color = new Color(1f, 0.5f, 0.9f, 0.3f);
-        Gizmos.DrawWireSphere(AssemblyCentre(), EffectiveRadius);
+        // Where each blob is being sent, so a seat landing off the silhouette is visible
+        // rather than something to be inferred from how it looks.
+        if (shapeColliders == null || shapeColliders.Pieces.Count == 0) return;
+
+        Gizmos.color = Color.cyan;
+
+        for (int i = 0; i < merged.Count; i++)
+        {
+            if (merged[i] == null) continue;
+
+            Vector3 target = SurfaceSeatFor(merged[i].transform.position, merged[i].visualRadius);
+
+            Gizmos.DrawWireSphere(target, merged[i].visualRadius);
+            Gizmos.DrawLine(merged[i].transform.position, target);
+        }
     }
 }

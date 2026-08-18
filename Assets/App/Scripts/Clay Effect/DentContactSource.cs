@@ -42,8 +42,10 @@ public class DentContactSource : MonoBehaviour
     [Tooltip("The character's actual colliders. When set, the reach in each direction is " +
              "measured against these rather than reconstructed from the shape maths.\n\n" +
              "Real geometry cannot disagree with what is physically there, and it covers " +
-             "composites and mid-morph blends without any special handling. Found in parents " +
-             "if empty.")]
+             "composites and mid-morph blends without any special handling.\n\n" +
+             "Leave empty on a BLOB: it is found from parents, and once absorbed a blob sits " +
+             "under the character, so it would otherwise adopt the character's reach as its " +
+             "own.")]
     public ClayShapeColliders shapeColliders;
 
     [Tooltip("Local offset of the character's centre from this transform.")]
@@ -260,6 +262,7 @@ public class DentContactSource : MonoBehaviour
     int builtDirectionCount;
     Rigidbody ownBody;
     float lastNearTime = -999f;
+    bool shapeCollidersResolved;
 
     // Reach per sample direction, refreshed once per probe rather than per ray. Each lookup
     // walks every collider piece, so asking inside the ray loop meant repeating that work
@@ -332,7 +335,18 @@ public class DentContactSource : MonoBehaviour
         if (owner == null) owner = GetComponentInParent<DentManager>();
         if (ownBody == null) ownBody = GetComponentInParent<Rigidbody>();
         if (shapeMorph == null) shapeMorph = GetComponentInChildren<ClayShapeMorph>();
-        if (shapeColliders == null) shapeColliders = GetComponentInParent<ClayShapeColliders>();
+
+        // Only ever this object's OWN shape colliders. Searching parents finds the
+        // character's set once a blob is absorbed into it - the blob is parented under the
+        // rolling object - and a small blob would then claim the character's entire reach,
+        // pressing everything around it violently out of shape.
+        if (!shapeCollidersResolved)
+        {
+            shapeCollidersResolved = true;
+
+            if (shapeColliders == null && GetComponentInParent<ClayBlob>() == null)
+                shapeColliders = GetComponentInParent<ClayShapeColliders>();
+        }
 
         EnsureDirections();
 
@@ -795,15 +809,12 @@ public class DentContactSource : MonoBehaviour
     {
         if (shapeColliders != null && shapeColliders.Pieces.Count > 0)
         {
-            // How far the collider surface sits along this direction, found by measuring at
-            // the furthest point it could be and asking how far short of that it falls.
-            float probe = shapeColliders.MaxReach;
-            Vector3 far = centre + worldDirection.normalized * probe;
-
-            float gap = shapeColliders.DistanceToSurface(far);
-            float colliderReach = Mathf.Max(probe - gap, 0.01f);
-
-            return colliderReach * shapeColliders.VisualOverCollider;
+            // Cast against the pieces, so this is where the surface actually is along this
+            // ray. Measuring with ClosestPoint from far away instead converges on the
+            // furthest point in the direction, which on a flat shape is a corner several
+            // times beyond the face being tested.
+            return shapeColliders.SurfaceDistanceAlong(worldDirection)
+                   * shapeColliders.VisualOverCollider;
         }
 
         return shapeMorph != null ? shapeMorph.SurfaceDistanceWorld(worldDirection) : visualRadius;
@@ -815,6 +826,21 @@ public class DentContactSource : MonoBehaviour
             ? shapeColliders.MaxReach * shapeColliders.VisualOverCollider
             : shapeMorph != null ? shapeMorph.MaxRadius
             : visualRadius;
+
+    /// <summary>
+    /// How far this object's surface reaches toward a world point.
+    ///
+    /// Used by siblings, so a blob interfacing with a morphed character measures against
+    /// where that character's surface actually is rather than a sphere it stopped being.
+    /// </summary>
+    public float ReachToward(Vector3 worldPoint)
+    {
+        Vector3 centre = transform.TransformPoint(centreOffset);
+        Vector3 direction = worldPoint - centre;
+
+        return direction.sqrMagnitude > 1e-6f ? ReachAlong(direction.normalized, centre)
+                                              : visualRadius;
+    }
 
     void ProbeByRays(Vector3 centre, float mergeDot)
     {
@@ -880,11 +906,15 @@ public class DentContactSource : MonoBehaviour
         float d = delta.magnitude;
         if (d < 1e-4f) return;
 
-        float ra = visualRadius;
-        float rb = other.visualRadius;
-        if (d >= ra + rb) return;   // not touching yet
-
         Vector3 axis = delta / d;   // from the sibling's surface into us
+
+        // The sibling's reach TOWARD US, not a fixed radius. A morphed character is not a
+        // sphere, so assuming one leaves a blob interfacing with a surface that is no longer
+        // where the character is - contacts against a shape that is not there any more.
+        float rb = other.ReachToward(centre);
+        float ra = ReachAlong(-axis, centre);
+
+        if (d >= ra + rb) return;   // not touching yet
 
         if (!flatSiblingInterfaces)
         {

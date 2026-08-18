@@ -3,6 +3,7 @@ Shader "Custom/DentStampRaw"
     Properties
     {
         _PrevDentMap ("Prev Dent Map", 2D) = "black" {}
+        _HeightField ("Height Field", 2D) = "black" {}
         _Decay ("Decay", Range(0,1)) = 0.98
 
         // Shape state, mirrored from the character material so dents are measured against

@@ -54,6 +54,14 @@ public class DentContactSource : MonoBehaviour
     [Tooltip("Which layers can produce dents.")]
     public LayerMask surfaceMask = ~0;
 
+    [Tooltip("Layers handled by a height field instead, and skipped here.\n\n" +
+             "Terrain especially. Sampling it as a height map is exact and continuous, so " +
+             "letting the ray pass ALSO describe it with plane stamps means two " +
+             "representations of the same ground fighting - which looks worse than either " +
+             "alone. Leave walls and props out of this: a height map cannot represent " +
+             "anything vertical.")]
+    public LayerMask heightFieldLayers = 0;
+
     [Tooltip("How many directions are sampled around the character. More catches small " +
              "features and thin edges; each one is a raycast.")]
     [Range(6, 64)] public int sampleDirections = 24;
@@ -485,6 +493,12 @@ public class DentContactSource : MonoBehaviour
             // tag it as one of ours.
             if (siblingColliders.Contains(col)) continue;
 
+            // Terrain colliders have no analytic form, so they would fall to the ray pass -
+            // but a height field describes them exactly and continuously, so they are left
+            // to it rather than being described twice.
+            if (IsHeightFieldLayer(col.gameObject.layer)) continue;
+            if (col is TerrainCollider) continue;
+
             if (col is BoxCollider box) { probingCollider = col; ProbeBox(box, centre, mergeDot); }
             else if (col is SphereCollider sphere) { probingCollider = col; ProbeSphere(sphere, centre, mergeDot); }
             else if (col is CapsuleCollider capsule) { probingCollider = col; ProbeCapsule(capsule, centre, mergeDot); }
@@ -861,6 +875,9 @@ public class DentContactSource : MonoBehaviour
                                               : visualRadius;
     }
 
+    /// <summary>Whether a layer is covered by a height field, and so skipped here.</summary>
+    bool IsHeightFieldLayer(int layer) => (heightFieldLayers.value & (1 << layer)) != 0;
+
     void ProbeByRays(Vector3 centre, float mergeDot)
     {
         // Reach is resolved once per direction up front. Each lookup walks every collider
@@ -882,6 +899,11 @@ public class DentContactSource : MonoBehaviour
 
             // Same reasoning as the overlap pass: our own assembly is not the world.
             if (ownBody != null && hit.collider.attachedRigidbody == ownBody) continue;
+
+            // Ground described by a height field is already handled, and describing it here
+            // as well puts two disagreeing surfaces on the same ground.
+            if (IsHeightFieldLayer(hit.collider.gameObject.layer)) continue;
+            if (hit.collider is TerrainCollider) continue;
 
             // Boxes, rounded primitives and convex meshes were already handled directly.
             if (hit.collider is BoxCollider || hit.collider is SphereCollider

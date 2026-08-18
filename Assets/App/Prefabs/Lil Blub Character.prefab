@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 4192387480525380367}
   - component: {fileID: 5736149953558448920}
+  - component: {fileID: 7566138014141181234}
   - component: {fileID: 6588635645056384827}
   - component: {fileID: 9136238580414757555}
   - component: {fileID: 4807807607735546416}
@@ -58,11 +59,34 @@ MonoBehaviour:
   rimSegments: 16
   discFillBoxes: 3
   coneRings: 3
-  manageTrigger: 1
   pinInertia: 1
   inertiaScale: 1
   drawGizmos: 1
   logColliders: 0
+--- !u!114 &7566138014141181234
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2782824578610637868}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ac11ea6b8496f1d49ad668fc799857c1, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::ClayHeightFieldSampler
+  dentManager: {fileID: 3003846175921538394}
+  followTarget: {fileID: 4192387480525380367}
+  groundMask:
+    serializedVersion: 2
+    m_Bits: 256
+  areaSize: 3
+  resolution: 12
+  probeHeight: 4
+  pressStrength: 1
+  normalPress: 1
+  skipWhenAirborne: 1
+  drawGizmos: 0
 --- !u!114 &6588635645056384827
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -98,7 +122,10 @@ MonoBehaviour:
   throwArc: 2
   spinDuration: 0.12
   pickupLockSeconds: 0.7
+  reseatDuration: 0.5
+  seatDepth: 0.3
   drawGizmos: 1
+  logReseat: 0
 --- !u!114 &9136238580414757555
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -166,12 +193,16 @@ MonoBehaviour:
   surfaceMask:
     serializedVersion: 2
     m_Bits: 4294967295
+  heightFieldLayers:
+    serializedVersion: 2
+    m_Bits: 256
   sampleDirections: 14
   curvatureSampleSpread: 0.3
   maxSurfaceRadius: 50
   mergeAngle: 25
   maxSources: 3
   minSink: 0.005
+  maxSinkFraction: 0.45
   owner: {fileID: 0}
   flatSiblingInterfaces: 0
   clampToEdges: 1

@@ -584,7 +584,11 @@ public class DentManager : MonoBehaviour
     {
         if (!skipWhenIdle) return true;
 
-        if (active.Count > 0 || debugStampAll)
+        // A height field presses without any DentSource of its own, so counting sources
+        // alone would call this idle while the ground is still deforming it - the stamp
+        // stops, and whatever was last written freezes onto the mesh and rides around with
+        // it.
+        if (active.Count > 0 || debugStampAll || externalPressActive)
         {
             lastActiveTime = Time.time;
             return true;
@@ -595,6 +599,13 @@ public class DentManager : MonoBehaviour
 
         return Time.time - lastActiveTime <= idleGraceTime;
     }
+
+    /// <summary>
+    /// Set by anything that presses the mesh without registering a DentSource - the height
+    /// field sampler especially. Without it the manager idles out while the ground is still
+    /// in contact.
+    /// </summary>
+    [System.NonSerialized] public bool externalPressActive;
 
     float lastActiveTime = -999f;
 

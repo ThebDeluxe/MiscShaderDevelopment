@@ -83,6 +83,8 @@
 // shrink by the same fraction, so the deep one stays visible far longer. _DecayDepthBias
 // adds a magnitude-dependent term so deeper dents fade faster and the two even out.
 
+#include "Assets/App/Art/Shaders/HLSL/ClayHeightField.hlsl"
+
 #define DENT_MAX   16
 
 #define DENT_SHAPE_CAPSULE  0
@@ -172,6 +174,26 @@ float3 EvaluateDentWorld(float3 WorldPos, float3 WorldNormal, out float DecayMul
     float  bestExtrasMagSq = 0.0;
     float  deepestPress    = 0.0;
     DecayMul = 1.0;
+
+    // Ground first, as one continuous surface. Terrain is genuinely a heightfield, so this
+    // is exact where a scattering of plane stamps is a set of flat guesses that disagree
+    // with each other wherever they meet.
+    float3 groundNormal;
+    float groundDepth;
+    float3 groundPush = ClayHeightFieldPush(WorldPos, groundNormal, groundDepth);
+
+    // Applied whatever the depth says. A vertex ABOVE the ground reports zero depth - it was
+    // not pressed into anything - but it still carries the bulge beside the contact, and
+    // gating on depth throws that away entirely.
+    pressAccum += groundPush;
+
+    if (groundDepth > 0.0)
+    {
+        deepestPress = groundDepth;
+
+        // Carries the manager's own rate, so the ground's dents fade like any other.
+        DecayMul = 1.0;
+    }
 
     for (int i = 0; i < _DentCount; i++)
     {

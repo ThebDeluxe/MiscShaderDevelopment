@@ -160,10 +160,11 @@ public class DentSource : MonoBehaviour
     public float SafeOuterRadius => Mathf.Max(outerRadius, 0.0001f);
 
     /// <summary>Largest lateral reach from the source, used for range checks.</summary>
-    public float LateralReach => shape == DentShape.Plane
-        ? Mathf.Max(Mathf.Abs(planeOffset.x) + SafeInnerRadius,
-                    Mathf.Abs(planeOffset.y) + SafeOuterRadius)
-        : SafeOuterRadius;
+    public float LateralReach =>
+        shape == DentShape.Plane
+            ? Mathf.Max(Mathf.Abs(planeOffset.x) + SafeInnerRadius,
+                        Mathf.Abs(planeOffset.y) + SafeOuterRadius)
+            : SafeOuterRadius;
 
     /// <summary>Sideways spread inside the contact. Meaningless for a Plane, whose
     /// displaced volume is handled by the splay instead.</summary>

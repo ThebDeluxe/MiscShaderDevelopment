@@ -55,14 +55,6 @@ public class ClayShapeColliders : MonoBehaviour
     [Tooltip("Rings of spheres up a cone, spreading its taper over several steps.")]
     [Range(1, 5)] public int coneRings = 3;
 
-    [Header("Interaction Trigger")]
-    [Tooltip("Build a trigger volume matching the shape, at the VISIBLE size.\n\n" +
-             "The controller's own outer trigger is a sphere, which is wrong for anything " +
-             "else. It does not block, so it never holds a shape off the ground, but it does " +
-             "report contact where the character visibly is not. One primitive is enough: " +
-             "this is a rough is-something-touching-me volume, not collision.")]
-    public bool manageTrigger = true;
-
     [Header("Mass")]
     [Tooltip("Pin the inertia tensor rather than letting Unity derive it from the pieces.\n\n" +
              "Worth doing: a compound recomputes mass distribution whenever its colliders " +
@@ -98,6 +90,11 @@ public class ClayShapeColliders : MonoBehaviour
     /// dent reach, pickup range, contact springs - previously carried its own copy of the
     /// shape maths, and each copy had to be corrected into agreement separately. Asking real
     /// geometry cannot disagree with itself.
+    ///
+    /// Only the shape's own pieces count. Anything else on the body is disabled outright,
+    /// because these queries cast against colliders directly and a stray one - a trigger
+    /// especially, which blocks nothing and so looks harmless - would answer for the surface
+    /// from wherever it happens to be.
     /// </summary>
     public Vector3 ClosestPoint(Vector3 worldPoint)
     {
@@ -320,11 +317,10 @@ public class ClayShapeColliders : MonoBehaviour
             // contact springs end up carrying them and the assembly floats.
             if (c.GetComponentInParent<ClayBlob>() != null) continue;
 
-            // A trigger blocks nothing, so it never holds a shape off the ground - but a
-            // sphere-shaped one still reports contact where a plank visibly is not, so it
-            // is replaced rather than left running alongside.
-            if (c.isTrigger && !manageTrigger) continue;
-
+            // Triggers included. They block nothing, so they never hold a shape off the
+            // ground - but every geometry query here casts against colliders directly, and
+            // Collider.Raycast hits a trigger like anything else. An oversized trigger then
+            // answers every question about where the surface is.
             c.enabled = false;
 
             if (logColliders)
@@ -447,8 +443,6 @@ public class ClayShapeColliders : MonoBehaviour
 
         Finish(scale);
 
-        if (manageTrigger) BuildTrigger(shape, d, style);
-
         // Re-checked on every rebuild, not just at startup: anything that re-enables a
         // collider later would otherwise quietly prop the shape up again.
         DisableForeignColliders();
@@ -456,45 +450,6 @@ public class ClayShapeColliders : MonoBehaviour
         if (logColliders)
             Debug.Log($"{name}: {shape} built as {style} from {pieces.Count} piece(s) - " +
                       $"across {across:0.00}, thick {thick:0.00}, along {along:0.00}.", this);
-    }
-
-    /// <summary>
-    /// One trigger primitive covering the VISIBLE silhouette.
-    ///
-    /// Deliberately a single primitive rather than a matching composite: this is a rough
-    /// "is something touching me" volume for interaction, not collision, so a close fit
-    /// would cost contacts for no benefit. Sized out past the solid pieces to the visible
-    /// surface, since that is what a player is aiming at.
-    /// </summary>
-    void BuildTrigger(ClayShape shape, ClayShapeMorph.ShapeDefinition d, ClayColliderStyle style)
-    {
-        float baseRadius = morph.baseRadius;
-
-        if (shape == ClayShape.Sphere || d == null)
-        {
-            var sphere = New<SphereCollider>("Trigger");
-            sphere.radius = baseRadius;
-            sphere.isTrigger = true;
-            return;
-        }
-
-        float across = d.width * baseRadius;
-        float thick = d.SafeThickness * baseRadius;
-        float along = d.length * baseRadius;
-
-        if (style == ClayColliderStyle.Capsule)
-        {
-            var capsule = New<CapsuleCollider>("Trigger");
-            capsule.direction = 2;
-            capsule.radius = Mathf.Min(across, thick);
-            capsule.height = Mathf.Max(along * 2f, Mathf.Min(across, thick) * 2f);
-            capsule.isTrigger = true;
-            return;
-        }
-
-        var box = New<BoxCollider>("Trigger");
-        box.size = new Vector3(across * 2f, thick * 2f, along * 2f);
-        box.isTrigger = true;
     }
 
     /// <summary>Long and round: one capsule is already the right shape.</summary>

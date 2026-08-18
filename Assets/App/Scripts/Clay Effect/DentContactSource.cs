@@ -67,8 +67,11 @@ public class DentContactSource : MonoBehaviour
     [Range(0.05f, 1f)] public float curvatureSampleSpread = 0.3f;
 
     [Tooltip("Largest surface radius considered. Anything flatter than this is treated as " +
-             "this radius, which reads as flat.")]
-    public float maxSurfaceRadius = 50f;
+             "this radius, which reads as flat.\n\n" +
+             "Kept modest: this is also what a failed curvature estimate falls back to, and " +
+             "a very large value there produces a contact curving so gently that it presses " +
+             "like an infinite plane - and draws a gizmo sphere the size of the level.")]
+    public float maxSurfaceRadius = 8f;
 
     [Header("Clustering")]
     [Tooltip("Surfaces whose normals are closer together than this angle are treated as one " +
@@ -83,6 +86,15 @@ public class DentContactSource : MonoBehaviour
     [Tooltip("Overlaps below this are ignored, so grazing surfaces do not flicker sources " +
              "in and out.")]
     public float minSink = 0.005f;
+
+    [Tooltip("Deepest overlap that will ever be reported, as a fraction of the reach in that " +
+             "direction.\n\n" +
+             "An object only sinks by design as far as the gap between its mesh and its " +
+             "collider - about a third of its radius. A contact reporting more than that " +
+             "means something upstream is wrong, and the result is a mesh pressed completely " +
+             "flat against a surface it is not really that deep into. Capping it stops a bad " +
+             "reading becoming maximum squish.")]
+    [Range(0.05f, 1f)] public float maxSinkFraction = 0.45f;
 
     [Tooltip("Manager these contacts belong to. Sources spawned here are marked as its " +
              "property, so a blob's floor contact cannot press a plane into a nearby " +
@@ -287,6 +299,10 @@ public class DentContactSource : MonoBehaviour
         // True when this is another blob in the same assembly rather than the world.
         public bool isSibling;
 
+        // Which collider produced this, kept for diagnosis only. A contact pointing at
+        // nothing visible is close to untraceable without knowing what generated it.
+        public Collider origin;
+
         // Running curvature estimate, gathered as samples of the same surface merge in.
         public float curvatureSum;
         public int curvatureSamples;
@@ -326,6 +342,7 @@ public class DentContactSource : MonoBehaviour
 
         public bool seenThisFrame;
         public DentSource source;
+        public Collider origin;
     }
 
     void LateUpdate()
@@ -468,12 +485,14 @@ public class DentContactSource : MonoBehaviour
             // tag it as one of ours.
             if (siblingColliders.Contains(col)) continue;
 
-            if (col is BoxCollider box) ProbeBox(box, centre, mergeDot);
-            else if (col is SphereCollider sphere) ProbeSphere(sphere, centre, mergeDot);
-            else if (col is CapsuleCollider capsule) ProbeCapsule(capsule, centre, mergeDot);
-            else if (col is MeshCollider mesh && mesh.convex) ProbeConvexMesh(mesh, centre, mergeDot);
+            if (col is BoxCollider box) { probingCollider = col; ProbeBox(box, centre, mergeDot); }
+            else if (col is SphereCollider sphere) { probingCollider = col; ProbeSphere(sphere, centre, mergeDot); }
+            else if (col is CapsuleCollider capsule) { probingCollider = col; ProbeCapsule(capsule, centre, mergeDot); }
+            else if (col is MeshCollider mesh && mesh.convex) { probingCollider = col; ProbeConvexMesh(mesh, centre, mergeDot); }
             else needsRaycastPass = true;
         }
+
+        probingCollider = null;
 
         // Rays are only needed for geometry that cannot be solved directly.
         if (needsRaycastPass) ProbeByRays(centre, mergeDot);
@@ -910,11 +929,39 @@ public class DentContactSource : MonoBehaviour
 
         // The sibling's reach TOWARD US, not a fixed radius. A morphed character is not a
         // sphere, so assuming one leaves a blob interfacing with a surface that is no longer
-        // where the character is - contacts against a shape that is not there any more.
+        // where the character is.
         float rb = other.ReachToward(centre);
         float ra = ReachAlong(-axis, centre);
 
         if (d >= ra + rb) return;   // not touching yet
+
+        // The real surface and its NORMAL where the sibling faces us, when it can tell us.
+        // Without that, the axis is the line between centres - which is only the surface
+        // normal on a sphere. Resting on a pancake's top face near the rim, that line points
+        // out toward the character's middle rather than down into the face being touched.
+        Vector3 surfacePoint = Vector3.zero;
+        Vector3 surfaceNormal = Vector3.up;
+        bool haveSurface = false;
+
+        if (other.shapeColliders != null)
+            haveSurface = other.shapeColliders.SurfaceToward(centre, out surfacePoint, out surfaceNormal);
+
+        if (haveSurface)
+        {
+            axis = surfaceNormal.normalized;
+
+            // Depth measured along that normal rather than between centres, so the two agree.
+            float gap = Vector3.Dot(centre - surfacePoint, axis);
+            float sinkAlong = ReachAlong(-axis, centre) - gap;
+
+            if (sinkAlong < minSink) return;
+
+            if (!flatSiblingInterfaces)
+            {
+                AddCurvedContact(surfacePoint - axis * rb, rb, centre, mergeDot, true);
+                return;
+            }
+        }
 
         if (!flatSiblingInterfaces)
         {
@@ -953,8 +1000,18 @@ public class DentContactSource : MonoBehaviour
         }, mergeDot);
     }
 
+    /// <summary>Which collider the probe currently running belongs to, recorded for diagnosis.</summary>
+    Collider probingCollider;
+
     void MergeOrAdd(Contact c, float mergeDot)
     {
+        c.origin = probingCollider;
+
+        // A contact deeper than the geometry allows means something upstream is wrong - a
+        // reach measured against the wrong shape, or a probe begun inside a collider. Capping
+        // it keeps that from turning into a fully flattened mesh.
+        float allowed = ReachToward(c.point) * maxSinkFraction;
+        if (c.sink > allowed) c.sink = allowed;
         for (int i = 0; i < contacts.Count; i++)
         {
             Contact existing = contacts[i];
@@ -1038,6 +1095,7 @@ public class DentContactSource : MonoBehaviour
                     bulgeRadius = contact.bulgeRadius,
                     curvature = contact.curvature,
                     isSibling = contact.isSibling,
+                    origin = contact.origin,
                     sink = contact.sink,
                     weight = 0f
                 };
@@ -1055,6 +1113,7 @@ public class DentContactSource : MonoBehaviour
                 match.bulgeRadius = Mathf.Lerp(match.bulgeRadius, contact.bulgeRadius, k);
                 match.curvature = Mathf.Lerp(match.curvature, contact.curvature, k);
                 match.isSibling = contact.isSibling;
+                match.origin = contact.origin;
 
                 if (contact.hasExtents)
                     match.right = Vector3.Slerp(match.right, contact.right, k).normalized;
@@ -1332,10 +1391,31 @@ public class DentContactSource : MonoBehaviour
             Gizmos.DrawSphere(s.point, 0.03f);
             Gizmos.DrawLine(s.point, s.point + s.pressAxis * 0.3f);
 
+#if UNITY_EDITOR
+            // What produced this contact. A dent pointing at nothing visible is otherwise
+            // guesswork - this names the collider responsible, and draws a line back to it.
+            string label = s.isSibling ? "sibling"
+                         : s.origin != null ? $"{s.origin.name} ({s.origin.GetType().Name})"
+                         : "ray";
+
+            UnityEditor.Handles.color = Color.yellow;
+            UnityEditor.Handles.Label(s.point + s.pressAxis * 0.35f, label);
+
+            if (s.origin != null)
+            {
+                Gizmos.color = new Color(1f, 0.3f, 0f, 0.6f);
+                Gizmos.DrawLine(s.point, s.origin.bounds.center);
+            }
+#endif
+
             if (s.shape == DentShape.Capsule || s.curvature != 0f)
             {
-                // The surface this stamp is matching, drawn where it actually curves.
-                Gizmos.DrawWireSphere(s.point - s.pressAxis * s.radius, s.radius);
+                // The surface this stamp is matching. Capped for display, since a nearly
+                // flat contact has a radius of many metres and would otherwise draw a sphere
+                // swallowing the whole scene.
+                float shown = Mathf.Min(s.radius, MaxReach * 3f);
+                if (shown > 0.01f) Gizmos.DrawWireSphere(s.point - s.pressAxis * shown, shown);
+
                 continue;
             }
 

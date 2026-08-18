@@ -145,6 +145,49 @@ public class ClayShapeColliders : MonoBehaviour
     }
 
     /// <summary>
+    /// Where a point would meet this shape's surface, and which way that surface faces.
+    ///
+    /// The normal matters as much as the point: treating the shape as a sphere and using the
+    /// centre-to-point line instead gives an axis that only happens to be right on a sphere.
+    /// On a pancake, something resting on the top face near the rim would be pressed toward
+    /// the middle of the character rather than straight down into the face it is on.
+    /// </summary>
+    public bool SurfaceToward(Vector3 worldPoint, out Vector3 point, out Vector3 normal)
+    {
+        point = worldPoint;
+        normal = Vector3.up;
+
+        if (pieces.Count == 0) return false;
+
+        Vector3 centre = Centre;
+        Vector3 inward = centre - worldPoint;
+
+        float distance = inward.magnitude;
+        if (distance < 1e-5f) return false;
+
+        inward /= distance;
+
+        // From the point, back toward the centre - so the first surface hit is the one
+        // facing the point, and its normal is the one to press along.
+        var ray = new Ray(worldPoint, inward);
+        float nearest = float.MaxValue;
+
+        for (int i = 0; i < pieces.Count; i++)
+        {
+            if (pieces[i] == null || !pieces[i].enabled) continue;
+
+            if (pieces[i].Raycast(ray, out RaycastHit hit, distance * 2f) && hit.distance < nearest)
+            {
+                nearest = hit.distance;
+                point = hit.point;
+                normal = hit.normal;
+            }
+        }
+
+        return nearest < float.MaxValue;
+    }
+
+    /// <summary>
     /// Distance from the shape's centre to its surface, along a world direction.
     ///
     /// Cast inward against the pieces rather than measured with ClosestPoint. That

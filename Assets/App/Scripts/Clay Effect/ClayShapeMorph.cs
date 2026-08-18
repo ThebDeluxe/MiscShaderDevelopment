@@ -497,11 +497,52 @@ public class ClayShapeMorph : MonoBehaviour
 
         ShapeDefinition definition = DefinitionFor(shape == ClayShape.Sphere ? previous : shape);
 
+        if (blending != null) StopCoroutine(blending);
+
+        // Going from one sculpted shape to another leaves the blend amount at 1 the whole
+        // way, so pushing the new dimensions straight in swaps them within a single frame -
+        // the shape snaps rather than morphing. Relaxing back to the base first gives the
+        // amount somewhere to travel, and reads as the clay letting go before it re-forms.
+        bool shapeToShape = previous != ClayShape.Sphere && shape != ClayShape.Sphere;
+
+        if (shapeToShape)
+        {
+            blending = StartCoroutine(BlendThroughBase(definition, customWorldAxis));
+            return;
+        }
+
         if (shape != ClayShape.Sphere) PushShape(definition, customWorldAxis);
         else SetAll(PivotID, pivotLocal);
 
-        if (blending != null) StopCoroutine(blending);
-        blending = StartCoroutine(Blend(shape == ClayShape.Sphere ? 0f : 1f, definition.duration));
+        blending = StartCoroutine(BlendAndFinish(shape == ClayShape.Sphere ? 0f : 1f,
+                                                 definition.duration));
+    }
+
+    IEnumerator BlendAndFinish(float to, float duration)
+    {
+        yield return Blend(to, duration);
+        blending = null;
+    }
+
+    /// <summary>
+    /// Relaxes to the base shape, swaps the dimensions there, then forms the new one.
+    ///
+    /// The swap happens while the blend amount is zero, so none of it is visible - which is
+    /// the only way to change dimensions without them jumping, since the shader has no
+    /// second set to interpolate against.
+    /// </summary>
+    IEnumerator BlendThroughBase(ShapeDefinition definition, Vector3 customWorldAxis)
+    {
+        // Half each way, so a shape-to-shape change takes about as long as any other.
+        float half = Mathf.Max(definition.duration, 0.02f) * 0.5f;
+
+        yield return Blend(0f, half);
+
+        PushShape(definition, customWorldAxis);
+
+        yield return Blend(1f, half);
+
+        blending = null;
     }
 
     Vector3 ResolveAxis(ShapeDefinition definition, Vector3 customWorldAxis)
@@ -561,7 +602,6 @@ public class ClayShapeMorph : MonoBehaviour
         }
 
         SetAll(AmountID, to);
-        blending = null;
     }
 
     void SetAll(int id, float value)

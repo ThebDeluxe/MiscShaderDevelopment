@@ -63,6 +63,10 @@ public class ClayCharacterController : MonoBehaviour
     [Tooltip("Handles the morph. Found in children if left empty.")]
     [SerializeField] private ClayShapeMorph shapeMorph;
 
+    // What the dropdown last asked for. Anything else is free to change the shape after
+    // that, and this will not argue with it.
+    private ClayShape lastShapeRequest = ClayShape.Sphere;
+
     [Header("Contact Softness")]
     [Tooltip("How the body is tested for collisions.\n\n" +
              "Discrete only checks where things ARE each step, so a thin collider moving " +
@@ -323,6 +327,7 @@ public class ClayCharacterController : MonoBehaviour
         if (steeringCamera == null) steeringCamera = FindFirstObjectByType<ThirdPersonCamera>();
         if (squash == null) squash = GetComponentInChildren<SquashStretch>();
         if (shapeMorph == null) shapeMorph = GetComponentInChildren<ClayShapeMorph>();
+        lastShapeRequest = shape;
 
         // Contacts are reported to the Rigidbody's GameObject, so the tracker has to live
         // there rather than on this one.
@@ -470,8 +475,17 @@ public class ClayCharacterController : MonoBehaviour
     {
         moveInput = moveAction.ReadValue<Vector2>();
 
-        // Picked up from the inspector, so the dropdown can be changed live while testing.
-        if (shapeMorph != null && shapeMorph.CurrentShape != shape) shapeMorph.SetShape(shape);
+        // Only when the dropdown itself CHANGES, not while it merely differs.
+        //
+        // Comparing against the morph's current shape every frame makes this an order that
+        // never stops being given: anything else that sets a shape - a morph trigger, say -
+        // gets overruled on the very next frame, so its change lasts a single frame and
+        // looks like nothing happened at all.
+        if (shapeMorph != null && shape != lastShapeRequest)
+        {
+            lastShapeRequest = shape;
+            shapeMorph.SetShape(shape);
+        }
 
         // Build up the jump charge while Space is held (capped at maxChargeTime).
         if (isCharging)

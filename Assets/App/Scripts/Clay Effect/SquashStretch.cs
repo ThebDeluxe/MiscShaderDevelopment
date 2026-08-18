@@ -67,6 +67,14 @@ public class SquashStretch : MonoBehaviour
     [Tooltip("Fallback pivot in local space, used only when no Pivot Collider is set.")]
     public Vector3 pivotLocal = Vector3.zero;
 
+    [Tooltip("The character's shape colliders. When set, the assembly's lowest point is taken " +
+             "from these.\n\n" +
+             "Necessary once shapes are in play: they take collision over from the " +
+             "controller's sphere, so the collider this would otherwise measure is disabled " +
+             "and reports nothing - which leaves the squash pivoting somewhere that is not " +
+             "the ground.")]
+    public ClayShapeColliders shapeColliders;
+
     // Extra colliders folded into the pivot. An assembly has to flatten onto its own lowest
     // point, not the original character's - otherwise a blob hanging below squashes toward
     // the character instead of onto the ground.
@@ -189,6 +197,8 @@ public class SquashStretch : MonoBehaviour
         // Same instance DentManager uses - the first access creates it, later ones reuse it.
         material = targetRenderer.material;
 
+        if (shapeColliders == null) shapeColliders = GetComponentInParent<ClayShapeColliders>();
+
         // The shader runs in the RENDERER's object space, which on a rolling character is a
         // different transform from this one. Converting against the wrong basis is what
         // makes the squash appear to spin with the mesh.
@@ -288,7 +298,23 @@ public class SquashStretch : MonoBehaviour
         Bounds combined = default;
         bool any = false;
 
-        if (pivotCollider != null)
+        // The shape colliders are what the character actually rests on once it can morph,
+        // so they decide where the ground is. A pancake's lowest point is a fraction of a
+        // sphere's, and a cone's is its base - neither is knowable from a fixed radius.
+        if (shapeColliders != null)
+        {
+            var pieces = shapeColliders.Pieces;
+
+            for (int i = 0; i < pieces.Count; i++)
+            {
+                if (pieces[i] == null || !pieces[i].enabled) continue;
+
+                if (!any) { combined = pieces[i].bounds; any = true; }
+                else combined.Encapsulate(pieces[i].bounds);
+            }
+        }
+
+        if (!any && pivotCollider != null && pivotCollider.enabled)
         {
             combined = pivotCollider.bounds;
             any = true;
@@ -296,7 +322,7 @@ public class SquashStretch : MonoBehaviour
 
         for (int i = 0; i < pivotColliders.Count; i++)
         {
-            if (pivotColliders[i] == null) continue;
+            if (pivotColliders[i] == null || !pivotColliders[i].enabled) continue;
 
             if (!any) { combined = pivotColliders[i].bounds; any = true; }
             else combined.Encapsulate(pivotColliders[i].bounds);

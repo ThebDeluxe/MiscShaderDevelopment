@@ -174,7 +174,7 @@ MonoBehaviour:
   targetUVChannel: 2
   weldEpsilon: 0.0001
   samplesPerIsland: 32
-  logBinding: 1
+  logBinding: 0
 --- !u!114 &2355919331725778481
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -213,9 +213,8 @@ MonoBehaviour:
   decayDepthBias: 0
   filterSourcesByBounds: 1
   boundsPadding: 0.05
-  islandRigidity: 0
-  rigidBelowRadius: 0.1
-  flexibleAboveRadius: 0.35
+  skipWhenIdle: 1
+  idleGraceTime: 2
   debugStampAll: 0
   overrideFlipY: 0
   flipYValue: 1
@@ -232,6 +231,8 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::DentContactSource
   visualRadius: 0.35
+  shapeMorph: {fileID: 0}
+  shapeColliders: {fileID: 0}
   centreOffset: {x: 0, y: 0, z: 0}
   surfaceMask:
     serializedVersion: 2
@@ -258,6 +259,8 @@ MonoBehaviour:
   bulgeReach: 1.75
   bulgeClamp: 0.3
   decayMultiplier: 2
+  skipWhenNothingNear: 1
+  idleGraceTime: 0.5
   drawGizmos: 1
   drawEdgeProbes: 0
   logExtents: 0

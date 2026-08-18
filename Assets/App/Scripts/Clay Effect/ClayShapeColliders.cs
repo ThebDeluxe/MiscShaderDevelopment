@@ -55,6 +55,14 @@ public class ClayShapeColliders : MonoBehaviour
     [Tooltip("Rings of spheres up a cone, spreading its taper over several steps.")]
     [Range(1, 5)] public int coneRings = 3;
 
+    [Header("Interaction Trigger")]
+    [Tooltip("Build a trigger volume matching the shape, at the VISIBLE size.\n\n" +
+             "The controller's own outer trigger is a sphere, which is wrong for anything " +
+             "else. It does not block, so it never holds a shape off the ground, but it does " +
+             "report contact where the character visibly is not. One primitive is enough: " +
+             "this is a rough is-something-touching-me volume, not collision.")]
+    public bool manageTrigger = true;
+
     [Header("Mass")]
     [Tooltip("Pin the inertia tensor rather than letting Unity derive it from the pieces.\n\n" +
              "Worth doing: a compound recomputes mass distribution whenever its colliders " +
@@ -67,6 +75,11 @@ public class ClayShapeColliders : MonoBehaviour
 
     [Header("Debug")]
     public bool drawGizmos = true;
+
+    [Tooltip("Log which colliders this takes over, and what it builds for each shape.\n\n" +
+             "Worth turning on if a flat shape will not lie flat: either something else is " +
+             "still colliding, or the shape resolved to a style that keeps it propped up.")]
+    public bool logColliders = false;
 
     readonly List<Collider> pieces = new List<Collider>();
 
@@ -188,14 +201,50 @@ public class ClayShapeColliders : MonoBehaviour
         holder = existing;
         built = true;
 
-        // The controller builds its own sphere in Awake and leaves it enabled. Two colliders
-        // on one body both collide, and the larger wins - so its sphere has to be handed
-        // over or these never get a contact.
-        if (controller != null && controller.InnerCollider != null)
-            controller.InnerCollider.enabled = false;
+        // Anything else on the body still collides alongside these, and being larger it wins
+        // - a leftover sphere at the centre holds a plank, a cone or a pyramid off the
+        // ground so it can never lie flat. Found rather than taken on trust, since a missing
+        // reference produces exactly that with no error to show for it.
+        DisableForeignColliders();
 
         Rebuild(ClayShape.Sphere);
     }
+
+    /// <summary>
+    /// Turns off every collider on the body that is not one of ours.
+    ///
+    /// The controller builds its own sphere in Awake, and any collider on a Rigidbody
+    /// contributes to its collision whether or not anything intends it to. Taking ownership
+    /// outright means a shape rests on what it looks like it should.
+    /// </summary>
+    void DisableForeignColliders()
+    {
+        body.GetComponentsInChildren(true, foreignBuffer);
+
+        for (int i = 0; i < foreignBuffer.Count; i++)
+        {
+            Collider c = foreignBuffer[i];
+            if (c == null) continue;
+            if (c.transform.IsChildOf(holder)) continue;     // ours
+
+            // Another Rigidbody's collider is not part of this body at all.
+            if (c.attachedRigidbody != body) continue;
+            if (!c.enabled) continue;
+
+            // A trigger blocks nothing, so it never holds a shape off the ground - but a
+            // sphere-shaped one still reports contact where a plank visibly is not, so it
+            // is replaced rather than left running alongside.
+            if (c.isTrigger && !manageTrigger) continue;
+
+            c.enabled = false;
+
+            if (logColliders)
+                Debug.Log($"{name}: took collision over from '{c.name}' ({c.GetType().Name}). " +
+                          "A leftover collider here is what stops a flat shape lying flat.", this);
+        }
+    }
+
+    static readonly List<Collider> foreignBuffer = new List<Collider>(16);
 
     void Update()
     {
@@ -286,7 +335,6 @@ public class ClayShapeColliders : MonoBehaviour
             case ClayColliderStyle.Sphere:
                 AddSphere(Vector3.zero, Mathf.Max(across, thick));
                 break;
-
             case ClayColliderStyle.Capsule:
                 BuildCapsule(Mathf.Min(across, thick), along);
                 break;
@@ -309,6 +357,55 @@ public class ClayShapeColliders : MonoBehaviour
         }
 
         Finish(scale);
+
+        if (manageTrigger) BuildTrigger(shape, d, style);
+
+        // Re-checked on every rebuild, not just at startup: anything that re-enables a
+        // collider later would otherwise quietly prop the shape up again.
+        DisableForeignColliders();
+
+        if (logColliders)
+            Debug.Log($"{name}: {shape} built as {style} from {pieces.Count} piece(s) - " +
+                      $"across {across:0.00}, thick {thick:0.00}, along {along:0.00}.", this);
+    }
+
+    /// <summary>
+    /// One trigger primitive covering the VISIBLE silhouette.
+    ///
+    /// Deliberately a single primitive rather than a matching composite: this is a rough
+    /// "is something touching me" volume for interaction, not collision, so a close fit
+    /// would cost contacts for no benefit. Sized out past the solid pieces to the visible
+    /// surface, since that is what a player is aiming at.
+    /// </summary>
+    void BuildTrigger(ClayShape shape, ClayShapeMorph.ShapeDefinition d, ClayColliderStyle style)
+    {
+        float baseRadius = morph.baseRadius;
+
+        if (shape == ClayShape.Sphere || d == null)
+        {
+            var sphere = New<SphereCollider>("Trigger");
+            sphere.radius = baseRadius;
+            sphere.isTrigger = true;
+            return;
+        }
+
+        float across = d.width * baseRadius;
+        float thick = d.SafeThickness * baseRadius;
+        float along = d.length * baseRadius;
+
+        if (style == ClayColliderStyle.Capsule)
+        {
+            var capsule = New<CapsuleCollider>("Trigger");
+            capsule.direction = 2;
+            capsule.radius = Mathf.Min(across, thick);
+            capsule.height = Mathf.Max(along * 2f, Mathf.Min(across, thick) * 2f);
+            capsule.isTrigger = true;
+            return;
+        }
+
+        var box = New<BoxCollider>("Trigger");
+        box.size = new Vector3(across * 2f, thick * 2f, along * 2f);
+        box.isTrigger = true;
     }
 
     /// <summary>Long and round: one capsule is already the right shape.</summary>

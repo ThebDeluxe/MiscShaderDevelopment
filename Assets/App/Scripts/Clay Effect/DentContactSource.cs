@@ -130,7 +130,10 @@ public class DentContactSource : MonoBehaviour
     public float edgeProbeTolerance = 0.06f;
 
     [Header("Stability")]
-    [Tooltip("Seconds for a surface's position, angle and extent to catch up when they move.")]
+    [Tooltip("Seconds for a surface's position, angle and extent to catch up when they move.\n\n" +
+             "Damps the jitter of a SAMPLED surface, where rays land in slightly different " +
+             "places each frame. Contacts worked out analytically - a merged sibling - skip " +
+             "it, since easing those only leaves them behind where the thing actually is.")]
     public float surfaceSmoothing = 0.06f;
 
     [Tooltip("Seconds for a newly found surface to reach full strength.")]
@@ -1126,6 +1129,13 @@ public class DentContactSource : MonoBehaviour
             else
             {
                 float k = surfaceSmoothing > 0f ? 1f - Mathf.Exp(-dt / surfaceSmoothing) : 1f;
+
+                // Smoothing exists to damp the jitter of a SAMPLED surface - rays land in
+                // slightly different places each frame, and an unsmoothed contact shimmers.
+                // A sibling is worked out from two known transforms, so there is nothing to
+                // damp, and easing it only leaves the contact behind where the blob actually
+                // is. Spin fast enough and that lag draws a trail along the path it took.
+                if (contact.isSibling) k = 1f;
 
                 match.shape = contact.shape;
                 match.point = Vector3.Lerp(match.point, contact.point, k);

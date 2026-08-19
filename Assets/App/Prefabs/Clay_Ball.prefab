@@ -193,7 +193,7 @@ MonoBehaviour:
   innerMaterial: {fileID: 13400000, guid: 103a7413afe344d489070d47d268c84d, type: 2}
   disableCollidersWhenMerged: 0
   mergedColliderScale: 0.4
-  contactSource: {fileID: 0}
+  contactSource: {fileID: 3264117517903881752}
 --- !u!114 &4409600814987039034
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -237,12 +237,16 @@ MonoBehaviour:
   surfaceMask:
     serializedVersion: 2
     m_Bits: 4294967295
+  heightFieldLayers:
+    serializedVersion: 2
+    m_Bits: 0
   sampleDirections: 12
   curvatureSampleSpread: 0.3
   maxSurfaceRadius: 50
   mergeAngle: 25
   maxSources: 3
   minSink: 0.005
+  maxSinkFraction: 0.45
   owner: {fileID: 0}
   flatSiblingInterfaces: 0
   clampToEdges: 1

@@ -85,6 +85,9 @@ MonoBehaviour:
   probeHeight: 4
   pressStrength: 1
   normalPress: 1
+  maxPressDepth: 0.3
+  bulgeAmount: 0.12
+  bulgeReach: 0.35
   skipWhenAirborne: 1
   drawGizmos: 0
 --- !u!114 &6588635645056384827
@@ -102,10 +105,10 @@ MonoBehaviour:
   body: {fileID: 0}
   rollingObject: {fileID: 6625386134798469017}
   ownContactSource: {fileID: 8682507769724385475}
-  morph: {fileID: 0}
-  shapeColliders: {fileID: 0}
+  morph: {fileID: 3616685081389852692}
+  shapeColliders: {fileID: 5736149953558448920}
   controller: {fileID: 2975038467675803792}
-  squash: {fileID: 0}
+  squash: {fileID: 4807807607735546416}
   blobMask:
     serializedVersion: 2
     m_Bits: 128
@@ -138,12 +141,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 132a88d4c7c02f4448d4cdda68aa7e74, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SoftBlobContacts
-  body: {fileID: 0}
+  body: {fileID: 710889707551558549}
   merger: {fileID: 6588635645056384827}
   includeOwnBody: 0
-  ownContactSource: {fileID: 0}
-  morph: {fileID: 0}
-  shapeColliders: {fileID: 0}
+  ownContactSource: {fileID: 8682507769724385475}
+  morph: {fileID: 3616685081389852692}
+  shapeColliders: {fileID: 5736149953558448920}
   stiffness: 120
   damping: 12
   maxOverlap: 0.3

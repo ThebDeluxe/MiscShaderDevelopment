@@ -199,7 +199,7 @@ Material:
     - _Metallic1: 0
     - _Metallic2: 0
     - _Metallic3: 0
-    - _Noise_Tiling: 1
+    - _Noise_Tiling: 0.25
     - _Normal_Strength: -1
     - _OcclusionStrength: 1
     - _Parallax: 0.005
@@ -217,7 +217,7 @@ Material:
     - _SrcBlendAlpha: 1
     - _Surface: 0
     - _Use_Vertex_Colour: 0
-    - _Vertex_Offset_Amount: 0.1
+    - _Vertex_Offset_Amount: 0.15
     - _Wobble_Speed: 3
     - _WorkflowMode: 1
     - _XRMotionVectorsPass: 1

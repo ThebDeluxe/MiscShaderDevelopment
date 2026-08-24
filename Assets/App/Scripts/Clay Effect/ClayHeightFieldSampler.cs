@@ -76,6 +76,18 @@ public class ClayHeightFieldSampler : MonoBehaviour
     [Tooltip("How far above the ground the bulge reaches.")]
     public float bulgeReach = 0.35f;
 
+    [Header("Matching The Contact Path")]
+    [Tooltip("Fade rate for terrain dents, as a multiplier on the manager's own.\n\n" +
+             "Match DentContactSource's Decay Multiplier, or terrain dents will linger for a " +
+             "different length of time than every other surface - which reads as terrain " +
+             "decaying slowly rather than as a setting being out of step.")]
+    [Range(0f, 5f)] public float decayMultiplier = 2f;
+
+    [Tooltip("Scale retained along the press, matching the stamps' Flatten Scale. Above 0 " +
+             "softens the press so terrain does not dent harder than a plane for the same " +
+             "contact.")]
+    [Range(0f, 1f)] public float flattenScale = 0.15f;
+
     [Tooltip("Only sample while the character is near ground of this type. Off means the " +
              "grid is rebuilt every frame regardless.")]
     public bool skipWhenAirborne = true;
@@ -226,7 +238,9 @@ public class ClayHeightFieldSampler : MonoBehaviour
         Vector3 centre = followTarget.position;
         stamp.SetVector(CentreID, new Vector4(centre.x, centre.y, centre.z,
                                               Mathf.Max(maxPressDepth, 0.001f)));
-        stamp.SetVector(BulgeID, new Vector4(bulgeAmount, Mathf.Max(bulgeReach, 0.001f), 0f, 0f));
+        stamp.SetVector(BulgeID, new Vector4(bulgeAmount, Mathf.Max(bulgeReach, 0.001f),
+                                            Mathf.Max(decayMultiplier, 0f),
+                                            Mathf.Clamp01(flattenScale)));
     }
 
     void OnDisable()

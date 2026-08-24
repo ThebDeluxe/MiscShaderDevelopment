@@ -34,7 +34,8 @@ float _HeightFieldNormalPress;
 float4 _HeightFieldCentre;
 
 // x = bulge amount, y = how far above the surface it reaches
-float2 _HeightFieldBulge;
+// z = decay multiplier, w = scale retained along the press (a flatten scale)
+float4 _HeightFieldBulge;
 
 /// Surface height at a world position, in world units. Bilinear, so the surface is smooth
 /// between samples rather than stepped.
@@ -120,6 +121,10 @@ float3 ClayHeightFieldPush(float3 worldPos, out float3 surfaceNormal, out float 
     // clipping begins - it reads as a punched hole rather than a press.
     float limit = _HeightFieldCentre.w;
     depth = limit * (1.0 - exp(-depth / max(limit, 1e-4)));
+
+    // The same scale the stamps keep along their press axis, so terrain does not dent harder
+    // than a plane does for the same contact.
+    depth *= (1.0 - saturate(_HeightFieldBulge.w));
 
     // Along the normal, by the PERPENDICULAR distance to the surface - which is the vertical
     // depth times the normal's own y, since that is the cosine of the slope. Pushing along

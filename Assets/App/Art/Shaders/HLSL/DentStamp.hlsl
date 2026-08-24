@@ -191,8 +191,10 @@ float3 EvaluateDentWorld(float3 WorldPos, float3 WorldNormal, out float DecayMul
     {
         deepestPress = groundDepth;
 
-        // Carries the manager's own rate, so the ground's dents fade like any other.
-        DecayMul = 1.0;
+        // The ground's own fade rate. Left at 1 it decays at the manager's base rate, while
+        // every contact-spawned stamp carries a multiplier of its own - so terrain would
+        // linger noticeably longer than any other surface for the same press.
+        DecayMul = max(_HeightFieldBulge.z, 0.0);
     }
 
     for (int i = 0; i < _DentCount; i++)

@@ -209,7 +209,7 @@ MonoBehaviour:
   targetRenderer: {fileID: 0}
   stampMaterial: {fileID: 2100000, guid: 6593a7ea94a518844b433590a9867d20, type: 2}
   format: 2
-  decayPerSecond: 0.9
+  decayPerSecond: 1
   decayDepthBias: 0
   filterSourcesByBounds: 1
   boundsPadding: 0.05
@@ -256,11 +256,11 @@ MonoBehaviour:
   fadeInTime: 0.08
   fadeOutTime: 0.25
   planeSizeScale: 1.2
-  planeEdgeSoftness: 0.25
-  flattenScale: 0.15
+  planeEdgeSoftness: 0.5
+  flattenScale: 0.5
   strength: 1
-  rimBulge: 1
-  bulgeReach: 1.75
+  rimBulge: 0.5
+  bulgeReach: 2
   bulgeClamp: 0.3
   decayMultiplier: 2
   skipWhenNothingNear: 1

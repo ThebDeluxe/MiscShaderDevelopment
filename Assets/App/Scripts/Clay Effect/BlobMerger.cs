@@ -36,8 +36,17 @@ public class BlobMerger : MonoBehaviour
     public DentContactSource ownContactSource;
 
     [Tooltip("Shape driver, so pickup follows the deformed silhouette rather than a sphere. " +
-             "Found in children if empty.")]
+    "Found in children if empty.")]
     public ClayShapeMorph morph;
+
+    [Tooltip("Attach absorbed blobs to the nearest of these, rather than to the Rolling " +
+             "Object.\n\n" +
+             "For a jointed character. A blob parented to a limb follows that bone, so it " +
+             "stays where it landed as the character moves. Leave EMPTY for a blob character, " +
+             "which has nothing to attach to but its own rolling mass.\n\n" +
+             "Filled from DentContactSource's Probe Origins if left empty on a Generic " +
+             "character.")]
+    public List<Collider> attachTargets = new List<Collider>();
 
     [Tooltip("The assembly's actual colliders, used to decide what is within reach.\n\n" +
              "Asking real geometry rather than recomputing the shape here means pickup " +
@@ -146,6 +155,15 @@ public class BlobMerger : MonoBehaviour
         if (squash == null) squash = GetComponentInChildren<SquashStretch>();
         if (morph == null) morph = GetComponentInChildren<ClayShapeMorph>();
         if (shapeColliders == null) shapeColliders = GetComponent<ClayShapeColliders>();
+
+        // A jointed character has no single rolling mass to attach to, so blobs go on the
+        // limb they touched and follow that bone. The probe origins are already the list of
+        // limbs, so they double as attach points.
+        if (attachTargets.Count == 0 && ownContactSource != null
+            && ownContactSource.probeOrigins.Count > 0)
+        {
+            attachTargets.AddRange(ownContactSource.probeOrigins);
+        }
 
         EffectiveRadius = ownContactSource != null ? ownContactSource.visualRadius : 0.5f;
 
@@ -399,19 +417,50 @@ public class BlobMerger : MonoBehaviour
 
     void Absorb(ClayBlob blob)
     {
-        blob.AttachTo(rollingObject);
-        merged.Add(blob);
+    // Onto the nearest limb where there are any, so the blob follows that bone as the
+    // character moves. Otherwise onto the rolling mass, which is all a blob character has.
+        Transform parent = NearestAttachPoint(blob.transform.position);
 
-        RegisterForSquash(blob);
+        blob.AttachTo(parent != null ? parent : rollingObject);
+    merged.Add(blob);
 
-        RecentrePivot();
+    RegisterForSquash(blob);
+
+        // Both of these move or resize the character itself, which is right for a growing
+    // ball and wrong for a rig - re-centring would drag the whole hierarchy sideways.
+    if (IsBlobCharacter)
+    {
+            RecentrePivot();
+            RefreshRollingRadius();
+        }
+
         RefreshSiblings();
-        RefreshRollingRadius();
         RefreshGroundProbe();
 
         // Blobs no longer carry their own colliders, so the assembly hangs no lower than
         // its own sphere - nothing to reach past.
         if (controller != null) controller.GroundProbeExtension = 0f;
+    }
+
+    /// <summary>Whether the whole-assembly behaviour applies, as against a jointed rig.</summary>
+    bool IsBlobCharacter => controller == null || controller.Kind == ClayCharacterKind.Blob;
+
+    /// <summary>The limb nearest a point, or null when there are no attach targets.</summary>
+    Transform NearestAttachPoint(Vector3 worldPoint)
+    {
+        Transform best = null;
+        float bestSq = float.MaxValue;
+
+        for (int i = 0; i < attachTargets.Count; i++)
+        {
+            Collider target = attachTargets[i];
+            if (target == null) continue;
+
+            float sq = (target.ClosestPoint(worldPoint) - worldPoint).sqrMagnitude;
+            if (sq < bestSq) { bestSq = sq; best = target.transform; }
+        }
+
+        return best;
     }
 
     /// <summary>

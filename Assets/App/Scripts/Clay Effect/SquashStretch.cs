@@ -68,12 +68,22 @@ public class SquashStretch : MonoBehaviour
     public Vector3 pivotLocal = Vector3.zero;
 
     [Tooltip("The character's shape colliders. When set, the assembly's lowest point is taken " +
-             "from these.\n\n" +
-             "Necessary once shapes are in play: they take collision over from the " +
-             "controller's sphere, so the collider this would otherwise measure is disabled " +
-             "and reports nothing - which leaves the squash pivoting somewhere that is not " +
-             "the ground.")]
+    "from these.\n\n" +
+    "Necessary once shapes are in play: they take collision over from the " +
+    "controller's sphere, so the collider this would otherwise measure is disabled " +
+    "and reports nothing - which leaves the squash pivoting somewhere that is not " +
+    "the ground.")]
     public ClayShapeColliders shapeColliders;
+
+    [Tooltip("Find the pivot from every collider on the body, rather than from a named one.\n\n" +
+             "For a character whose colliders are authored by hand - a Generic one - there is " +
+             "no single collider that is the bottom. Taking the lowest point across all of " +
+             "them puts the pivot on whichever foot is actually down, so a landing squashes " +
+             "onto the ground rather than about the character's middle.")]
+    public bool pivotFromBodyColliders = false;
+
+    [Tooltip("Body whose colliders are searched. Falls back to one on this object or above.")]
+    public Rigidbody pivotBody;
 
     // Extra colliders folded into the pivot. An assembly has to flatten onto its own lowest
     // point, not the original character's - otherwise a blob hanging below squashes toward
@@ -109,6 +119,7 @@ public class SquashStretch : MonoBehaviour
     // assembly flattens to the same height rather than each part squashing about itself.
     readonly List<Renderer> extraRenderers = new List<Renderer>();
     readonly List<Material> extraMaterials = new List<Material>();
+    static readonly List<Collider> bodyColliderBuffer = new List<Collider>(24);
 
     /// <summary>Adds a renderer to be deformed by the same spring.</summary>
     public void AddRenderer(Renderer renderer)
@@ -198,6 +209,7 @@ public class SquashStretch : MonoBehaviour
         material = targetRenderer.material;
 
         if (shapeColliders == null) shapeColliders = GetComponentInParent<ClayShapeColliders>();
+        if (pivotBody == null) pivotBody = GetComponentInParent<Rigidbody>();
 
         // The shader runs in the RENDERER's object space, which on a rolling character is a
         // different transform from this one. Converting against the wrong basis is what
@@ -295,13 +307,31 @@ public class SquashStretch : MonoBehaviour
     /// </summary>
     Vector3 PivotWorld()
     {
-        Bounds combined = default;
-        bool any = false;
+    Bounds combined = default;
+    bool any = false;
+
+    // Every collider on the body. For a character whose colliders are authored rather
+    // than generated there is no single one that is the bottom, and the lowest point
+    // moves between feet as it walks - so it is found fresh rather than named.
+    if (pivotFromBodyColliders && pivotBody != null)
+    {
+    pivotBody.GetComponentsInChildren(false, bodyColliderBuffer);
+
+    for (int i = 0; i < bodyColliderBuffer.Count; i++)
+    {
+    Collider c = bodyColliderBuffer[i];
+                if (c == null || !c.enabled || c.isTrigger) continue;
+    if (c.attachedRigidbody != pivotBody) continue;
+
+        if (!any) { combined = c.bounds; any = true; }
+            else combined.Encapsulate(c.bounds);
+            }
+        }
 
         // The shape colliders are what the character actually rests on once it can morph,
         // so they decide where the ground is. A pancake's lowest point is a fraction of a
         // sphere's, and a cone's is its base - neither is knowable from a fixed radius.
-        if (shapeColliders != null)
+        if (!any && shapeColliders != null)
         {
             var pieces = shapeColliders.Pieces;
 

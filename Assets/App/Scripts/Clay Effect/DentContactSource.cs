@@ -51,6 +51,16 @@ public class DentContactSource : MonoBehaviour
     [Tooltip("Local offset of the character's centre from this transform.")]
     public Vector3 centreOffset = Vector3.zero;
 
+    [Tooltip("Extra colliders to probe from, for a character that is not one round mass.\n\n" +
+             "Everything here probes outward from a single centre, which is fine for a blob " +
+             "and useless on a jointed character: an arm is hidden behind the torso, so no " +
+             "ray from the middle ever reaches it and it never dents. Listing a collider per " +
+             "limb gives each its own origin and its own reach.\n\n" +
+             "Any collider works, including ones parented under bones - it is read for its " +
+             "world bounds each frame, so it follows animation.\n\n" +
+             "Leave EMPTY for a blob. The single centre above is then used exactly as before.")]
+    public List<Collider> probeOrigins = new List<Collider>();
+
     [Tooltip("Which layers can produce dents.")]
     public LayerMask surfaceMask = ~0;
 
@@ -287,6 +297,11 @@ public class DentContactSource : MonoBehaviour
     float lastNearTime = -999f;
     bool shapeCollidersResolved;
 
+    // Reach of the origin currently being probed from. A limb measures against its own size,
+    // not the whole character's - a hand claiming the body's radius would report a contact
+    // as far deeper than it is.
+    float activeReach;
+
     // Reach per sample direction, refreshed once per probe rather than per ray. Each lookup
     // walks every collider piece, so asking inside the ray loop meant repeating that work
     // for directions whose answer had not changed.
@@ -408,11 +423,34 @@ public class DentContactSource : MonoBehaviour
     /// </summary>
     bool AnythingNear()
     {
-        if (!skipWhenNothingNear) return true;
+    if (!skipWhenNothingNear) return true;
 
-        Vector3 centre = transform.TransformPoint(centreOffset);
+    // Checked per origin, not from one centre. A jointed character's feet are a metre
+        // below its middle, so a single sphere around the body never reaches them - and
+    // gating the whole probe on that means nothing ever registers a contact at all.
+    if (probeOrigins.Count > 0)
+        {
+        for (int i = 0; i < probeOrigins.Count; i++)
+        {
+        Collider origin = probeOrigins[i];
+        if (origin == null || !origin.enabled) continue;
 
-        int count = Physics.OverlapSphereNonAlloc(centre, MaxReach, overlaps,
+        if (AnythingNearOrigin(origin.bounds.center, origin.bounds.extents.magnitude))
+            return true;
+        }
+
+        // Keep going briefly, so anything already tracked finishes fading.
+        return Time.time - lastNearTime <= idleGraceTime;
+        }
+
+        if (AnythingNearOrigin(transform.TransformPoint(centreOffset), MaxReach)) return true;
+
+        return Time.time - lastNearTime <= idleGraceTime;
+    }
+
+    bool AnythingNearOrigin(Vector3 centre, float reach)
+    {
+        int count = Physics.OverlapSphereNonAlloc(centre, reach, overlaps,
                                                   surfaceMask, QueryTriggerInteraction.Ignore);
 
         for (int i = 0; i < count; i++)
@@ -424,8 +462,7 @@ public class DentContactSource : MonoBehaviour
             return true;
         }
 
-        // Keep going briefly, so anything already tracked finishes fading.
-        return Time.time - lastNearTime <= idleGraceTime;
+        return false;
     }
 
     void LogExtentsIfDue()
@@ -471,10 +508,54 @@ public class DentContactSource : MonoBehaviour
         contacts.Clear();
         probeLog.Clear();
 
-        Vector3 centre = transform.TransformPoint(centreOffset);
         float mergeDot = Mathf.Cos(mergeAngle * Mathf.Deg2Rad);
 
-        int count = Physics.OverlapSphereNonAlloc(centre, MaxReach, overlaps,
+    // One origin per limb where they are listed, otherwise the single centre. A jointed
+        // character cannot be probed from its middle: an arm sits behind the torso, so no ray
+        // from there ever reaches it and it never dents.
+    if (probeOrigins.Count == 0)
+    {
+        ProbeFrom(transform.TransformPoint(centreOffset), null, mergeDot);
+        }
+    else
+    {
+    for (int i = 0; i < probeOrigins.Count; i++)
+    {
+                Collider origin = probeOrigins[i];
+        if (origin == null || !origin.enabled) continue;
+
+        // Read from world bounds each frame, so an origin parented under a bone
+            // follows the animation without anything here needing to know about the rig.
+                ProbeFrom(origin.bounds.center, origin, mergeDot);
+            }
+        }
+
+        // Once for the whole character, not per origin. A sibling interface is between two
+        // bodies rather than between a limb and the world, and sorting per origin would let
+        // an early one's contacts be trimmed before the rest had been gathered.
+        Vector3 centre = transform.TransformPoint(centreOffset);
+    for (int i = 0; i < siblings.Count; i++) ProbeSibling(siblings[i], centre, mergeDot);
+
+        FinaliseSampledCurvature();
+
+    contacts.Sort((a, b) => b.sink.CompareTo(a.sink));
+    }
+
+    /// <summary>
+    /// Probes outward from one origin.
+    ///
+    /// Contacts accumulate into the shared list, so several origins merge and compete for
+    /// source slots exactly as one origin's contacts do - a limb touching the same wall as
+    /// the torso produces one contact between them, not two.
+    /// </summary>
+    void ProbeFrom(Vector3 centre, Collider origin, float mergeDot)
+    {
+        // A listed origin reaches as far as its own bounds; the single centre uses the
+        // character's whole silhouette.
+        float reach = origin != null ? origin.bounds.extents.magnitude : MaxReach;
+        activeReach = reach;
+
+        int count = Physics.OverlapSphereNonAlloc(centre, reach, overlaps,
                                                   surfaceMask, QueryTriggerInteraction.Ignore);
 
         bool needsRaycastPass = false;
@@ -513,12 +594,6 @@ public class DentContactSource : MonoBehaviour
 
         // Rays are only needed for geometry that cannot be solved directly.
         if (needsRaycastPass) ProbeByRays(centre, mergeDot);
-
-        for (int i = 0; i < siblings.Count; i++) ProbeSibling(siblings[i], centre, mergeDot);
-
-        FinaliseSampledCurvature();
-
-        contacts.Sort((a, b) => b.sink.CompareTo(a.sink));
     }
 
     /// <summary>
@@ -853,7 +928,8 @@ public class DentContactSource : MonoBehaviour
                    * shapeColliders.VisualOverCollider;
         }
 
-        return shapeMorph != null ? shapeMorph.SurfaceDistanceWorld(worldDirection) : visualRadius;
+        return shapeMorph != null ? shapeMorph.SurfaceDistanceWorld(worldDirection)
+                                      : (activeReach > 0f ? activeReach : visualRadius);
     }
 
     /// <summary>Furthest the surface reaches in any direction, for the broad overlap test.</summary>
@@ -1412,8 +1488,26 @@ public class DentContactSource : MonoBehaviour
 
         Vector3 centre = transform.TransformPoint(centreOffset);
 
-        Gizmos.color = new Color(0.3f, 0.8f, 1f, 0.4f);
-        Gizmos.DrawWireSphere(centre, visualRadius);
+        // With origins listed, the single radius describes nothing - it is not what anything
+        // probes from any more. Drawing it anyway suggests a reach the system does not use.
+        if (probeOrigins.Count > 0)
+        {
+            Gizmos.color = new Color(0.3f, 0.8f, 1f, 0.5f);
+
+            for (int i = 0; i < probeOrigins.Count; i++)
+            {
+                Collider origin = probeOrigins[i];
+                if (origin == null) continue;
+
+                Bounds b = origin.bounds;
+                Gizmos.DrawWireSphere(b.center, b.extents.magnitude);
+            }
+        }
+        else
+        {
+            Gizmos.color = new Color(0.3f, 0.8f, 1f, 0.4f);
+            Gizmos.DrawWireSphere(centre, visualRadius);
+        }
 
         for (int i = 0; i < tracked.Count; i++)
         {

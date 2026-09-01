@@ -1,6 +1,28 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
+/// <summary>What kind of character this is, which decides which clay features apply.</summary>
+public enum ClayCharacterKind
+{
+    /// <summary>
+    /// A rolling blob. Everything applies: torque-driven rolling, whole-body squash and
+    /// stretch, shape morphing, and absorbing other blobs.
+    /// </summary>
+    Blob = 0,
+
+    /// <summary>
+    /// Any other character - humanoid, quadruped, jointed, or simply not round.
+    ///
+    /// Walks rather than rolls, and uses colliders authored by hand. Squash, stretch and
+    /// morphing are switched off rather than merely unused: they scale the whole mesh about
+    /// a single axis, which on a jointed character squashes the head into the feet.
+    ///
+    /// Denting still works, and is the point of using this mode - surface deformation on an
+    /// arbitrary shape.
+    /// </summary>
+    Generic = 1
+}
+
 /// <summary>
 /// A rolling-ball character controller for Unity's new Input System, split across two
 /// referenced objects:
@@ -20,11 +42,39 @@ using UnityEngine.InputSystem;
 /// </summary>
 public class ClayCharacterController : MonoBehaviour
 {
+    [Header("Character")]
+    [Tooltip("What kind of character this is.\n\n" +
+    "BLOB rolls with torque, squashes and stretches, morphs between shapes and " +
+    "absorbs other blobs. Its colliders are generated to match its current shape.\n\n" +
+    "GENERIC walks instead, and uses colliders you author yourself. Squash, stretch " +
+    "and morphing are switched off entirely - they scale the whole mesh about one " +
+    "axis, which on a jointed character squashes the head into the feet. Denting " +
+    "still applies, and is the reason to use this mode.")]
+    [SerializeField] private ClayCharacterKind characterKind = ClayCharacterKind.Blob;
+
+    /// <summary>Which feature set is active. Read by the other clay components.</summary>
+    public ClayCharacterKind Kind => characterKind;
+
+    /// <summary>True when whole-body deformation applies. False for a jointed character.</summary>
+    public bool SupportsWholeBodyDeformation => characterKind == ClayCharacterKind.Blob;
+
     [Header("References")]
     [Tooltip("The Rigidbody. Physics owns its rotation, so torque rolls it directly.")]
     [SerializeField] private Rigidbody positionBody;
     [Tooltip("Child holding the visuals. Inherits the body's rotation automatically.")]
     [SerializeField] private Transform rollingObject;
+
+    [Header("Generic Movement")]
+    [Tooltip("How quickly a Generic character reaches its move speed, in metres per second " +
+             "squared. Higher is snappier.")]
+    [SerializeField] private float walkAcceleration = 40f;
+
+    [Tooltip("How quickly it stops when there is no input.")]
+    [SerializeField] private float walkBraking = 60f;
+
+    [Tooltip("How quickly it turns to face the way it is going, in degrees per second. " +
+             "0 leaves facing alone, for a character whose rotation is driven elsewhere.")]
+    [SerializeField] private float turnSpeed = 720f;
 
     [Header("Colliders")]
     [Tooltip("Physical collision radius, and the radius the ball actually rolls on.\n\n" +
@@ -293,9 +343,10 @@ public class ClayCharacterController : MonoBehaviour
             Debug.LogError("ClayCharacterController: Position Body is not assigned.", this);
         else
         {
-            // Physics owns rotation, so torque genuinely rolls the body and attached
-            // colliders are swept rather than teleported.
-            positionBody.freezeRotation = false;
+            // Physics owns rotation for a blob, so torque genuinely rolls it and attached
+            // colliders are swept rather than teleported. An upright character is the
+            // opposite: it should never tip over, so rotation is frozen and driven by facing.
+            positionBody.freezeRotation = characterKind != ClayCharacterKind.Blob;
 
             // Physics steps at a fixed rate while rendering does not, so without
             // interpolation the transform only moves on physics ticks and the renderer
@@ -318,7 +369,15 @@ public class ClayCharacterController : MonoBehaviour
         if (rollingObject == null)
             Debug.LogError("ClayCharacterController: Rolling Object is not assigned.", this);
 
-        if (manageColliders) SetUpColliders();
+        if (manageColliders && characterKind == ClayCharacterKind.Blob) SetUpColliders();
+
+        if (characterKind != ClayCharacterKind.Blob && manageColliders)
+        {
+            Debug.LogWarning($"{name}: Manage Colliders is on but the character is Generic. " +
+                             "Its colliders are authored by hand, so nothing was generated - " +
+                             "make sure the body has colliders of its own or it will fall " +
+                             "through the world.", this);
+        }
 
         // The radius that touches the ground, not the visible one. Friction ties travel to
         // spin through the contact radius, so the target spin has to be derived from it.
@@ -328,6 +387,8 @@ public class ClayCharacterController : MonoBehaviour
         if (squash == null) squash = GetComponentInChildren<SquashStretch>();
         if (shapeMorph == null) shapeMorph = GetComponentInChildren<ClayShapeMorph>();
         lastShapeRequest = shape;
+
+        DisableBlobOnlyFeatures();
 
         // Contacts are reported to the Rigidbody's GameObject, so the tracker has to live
         // there rather than on this one.
@@ -439,6 +500,37 @@ public class ClayCharacterController : MonoBehaviour
 
         if (innerCollider != null) innerCollider.radius = innerRadius;
         if (outerCollider != null) outerCollider.radius = outerRadius;
+    }
+
+    /// <summary>
+    /// Switches off the features that describe the character as one primitive.
+    ///
+    /// Shape morphing and generated shape colliders both do exactly that, which a jointed
+    /// character is not. They are disabled rather than left idle so they cost nothing and
+    /// cannot be driven by something else by accident.
+    ///
+    /// Squash and stretch and blob absorption are NOT in that list. Both work on a jointed
+    /// character: the squash finds its pivot from the authored colliders, and an absorbed
+    /// blob attaches to the limb it touched rather than to a rolling mass. Denting is
+    /// likewise untouched - it works per vertex against world contacts and has no idea what
+    /// shape the character is, which is what makes it worth using here.
+    /// </summary>
+    private void DisableBlobOnlyFeatures()
+    {
+        if (characterKind == ClayCharacterKind.Blob) return;
+
+        if (shapeMorph != null) shapeMorph.enabled = false;
+
+        var colliders = GetComponentInChildren<ClayShapeColliders>();
+        if (colliders != null) colliders.enabled = false;
+
+        // The pivot has to come from the authored colliders - there is no generated sphere
+        // to measure, and the lowest point moves between feet as the character walks.
+        if (squash != null)
+        {
+            squash.pivotFromBodyColliders = true;
+            if (squash.pivotBody == null) squash.pivotBody = positionBody;
+        }
     }
 
     private void OnEnable()
@@ -555,7 +647,39 @@ public class ClayCharacterController : MonoBehaviour
         Vector3 desiredDir = right * moveInput.x + forward * moveInput.y;
         if (desiredDir.sqrMagnitude > 1f) desiredDir.Normalize();
 
-        MovePhysical(desiredDir);
+        if (characterKind == ClayCharacterKind.Blob) MovePhysical(desiredDir);
+        else MoveUpright(desiredDir);
+    }
+
+    /// <summary>
+    /// Walks rather than rolls: velocity is steered directly and rotation stays upright.
+    ///
+    /// A jointed character has no rolling radius and no sensible spin, so none of the torque
+    /// machinery applies. Velocity is set rather than pushed so the character stops when the
+    /// input does, which is what an upright character should do and the opposite of what a
+    /// blob's momentum should.
+    /// </summary>
+    private void MoveUpright(Vector3 desiredDir)
+    {
+        Vector3 velocity = positionBody.linearVelocity;
+        Vector3 horizontal = new Vector3(velocity.x, 0f, velocity.z);
+
+        bool steering = desiredDir.sqrMagnitude > 1e-4f;
+
+        Vector3 target = steering ? desiredDir * moveSpeed : Vector3.zero;
+        float rate = (steering ? walkAcceleration : walkBraking) * Time.fixedDeltaTime;
+
+        horizontal = Vector3.MoveTowards(horizontal, target, Mathf.Max(rate, 0.01f));
+
+        positionBody.linearVelocity = new Vector3(horizontal.x, velocity.y, horizontal.z);
+
+        // Face the way it is going, about the vertical only - nothing here should tip it over.
+        if (steering && rollingObject != null && turnSpeed > 0f)
+        {
+            Quaternion facing = Quaternion.LookRotation(desiredDir, Vector3.up);
+            rollingObject.rotation = Quaternion.RotateTowards(rollingObject.rotation, facing,
+                                                              turnSpeed * Time.fixedDeltaTime);
+        }
     }
 
     /// <summary>

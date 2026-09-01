@@ -603,17 +603,21 @@ PrefabInstance:
       propertyPath: targetRenderer
       value: 
       objectReference: {fileID: 4153988108579968963}
+    - target: {fileID: 4807807607735546416, guid: d954b125bba7c7a459c80235c257f95d, type: 3}
+      propertyPath: pivotFromBodyColliders
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 5379039925519020834, guid: d954b125bba7c7a459c80235c257f95d, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 0
+      value: -3.41
       objectReference: {fileID: 0}
     - target: {fileID: 5379039925519020834, guid: d954b125bba7c7a459c80235c257f95d, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0
+      value: 0.98
       objectReference: {fileID: 0}
     - target: {fileID: 5379039925519020834, guid: d954b125bba7c7a459c80235c257f95d, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 0
+      value: 2.12
       objectReference: {fileID: 0}
     - target: {fileID: 5379039925519020834, guid: d954b125bba7c7a459c80235c257f95d, type: 3}
       propertyPath: m_LocalRotation.w

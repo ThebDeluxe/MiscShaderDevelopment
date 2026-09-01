@@ -101,6 +101,13 @@ public class SquashStretch : MonoBehaviour
     [Header("Debug")]
     public bool drawGizmos = true;
 
+    [Tooltip("Log each impulse and hold as it arrives, and report the spring's value.\n\n" +
+             "The spring only moves when the controller drives it - a jump charge, a launch, " +
+             "a landing. If nothing appears here, the controller is not reaching this " +
+             "component; if values appear but nothing moves, the material is not receiving " +
+             "them.")]
+    public bool logDriving = false;
+
     // Shader properties on the character material. These must exist as Per Material scope
     // properties in the graph, and be fed to the squash Custom Function node.
     const string AxisProperty   = "_SquashAxis";
@@ -164,7 +171,9 @@ public class SquashStretch : MonoBehaviour
     /// </summary>
     public void SetHold(float amount)
     {
-        holdTarget = Mathf.Clamp(amount, -maxStretch, maxStretch);
+    holdTarget = Mathf.Clamp(amount, -maxStretch, maxStretch);
+
+        if (logDriving) Debug.Log($"{name}: hold {holdTarget:0.000}", this);
     }
 
     /// <summary>
@@ -177,11 +186,16 @@ public class SquashStretch : MonoBehaviour
     /// </summary>
     public void AddImpulse(float velocityChange, float wobbleDuration = 0f)
     {
-        springVelocity += velocityChange;
+    springVelocity += velocityChange;
 
-        activeDamping = wobbleDuration > 0.01f
-            ? Mathf.Max(6f / wobbleDuration, 0.5f)
-            : damping;
+    activeDamping = wobbleDuration > 0.01f
+    ? Mathf.Max(6f / wobbleDuration, 0.5f)
+    : damping;
+
+        if (logDriving)
+        Debug.Log($"{name}: impulse {velocityChange:0.00}, wobble {wobbleDuration:0.00}s, " +
+        $"material {(material != null ? material.name : "NONE")}, " +
+                      $"{extraMaterials.Count} extra", this);
     }
 
     /// <summary>Drops everything back to rest immediately.</summary>
@@ -234,6 +248,16 @@ public class SquashStretch : MonoBehaviour
         float dt = Time.deltaTime;
         if (dt <= 0f) return;
 
+        // Ticks regardless of whether anything is moving, so this distinguishes "not running"
+        // from "running but at rest". A component whose impulses log while this stays silent
+        // is disabled - AddImpulse is a public method and does not care about that.
+        if (logDriving && Time.time >= nextAliveLog)
+        {
+            nextAliveLog = Time.time + 0.5f;
+            Debug.Log($"{name}: alive, spring {springValue:0.000}, hold {holdTarget:0.000}, " +
+                      $"material {(material != null ? material.name : "NONE")}", this);
+        }
+
         float height = motionSource.position.y;
         float verticalSpeed = (height - lastHeight) / dt;
         lastHeight = height;
@@ -266,15 +290,24 @@ public class SquashStretch : MonoBehaviour
 
     void Push()
     {
-        Vector3 pivotWS = PivotWorld();
+    Vector3 pivotWS = PivotWorld();
 
-        Apply(material, rendererTransform, pivotWS);
+    Apply(material, rendererTransform, pivotWS);
 
-        for (int i = 0; i < extraRenderers.Count; i++)
-        {
-            if (extraRenderers[i] == null) continue;
-            Apply(extraMaterials[i], extraRenderers[i].transform, pivotWS);
-        }
+    for (int i = 0; i < extraRenderers.Count; i++)
+    {
+    if (extraRenderers[i] == null) continue;
+    Apply(extraMaterials[i], extraRenderers[i].transform, pivotWS);
+    }
+
+        // Only while it is actually moving, or this would log every frame at rest. Seeing a
+        // value here and no movement on screen means the material is receiving it and the
+        // shader is not applying it; seeing nothing at all means this never runs, which for
+        // a component whose impulses still log is the signature of it being DISABLED -
+        // AddImpulse is a public method and does not care.
+        if (logDriving && Mathf.Abs(springValue) > 0.001f)
+            Debug.Log($"{name}: applying {springValue:0.000} to " +
+                      $"{(material != null ? material.name : "NONE")}", this);
     }
 
     /// <summary>
@@ -358,10 +391,24 @@ public class SquashStretch : MonoBehaviour
             else combined.Encapsulate(pivotColliders[i].bounds);
         }
 
+        if (!any && pivotFromBodyColliders && !warnedNoPivotColliders)
+        {
+            warnedNoPivotColliders = true;
+
+            Debug.LogWarning($"{name}: Pivot From Body Colliders is on but no colliders were " +
+                             $"found on '{(pivotBody != null ? pivotBody.name : "no body")}'. " +
+                             "Only colliders whose attachedRigidbody is that body count, so a " +
+                             "collider group parented outside it will not be seen. The squash " +
+                             "is pivoting on a fixed local point instead of the ground.", this);
+        }
+
         if (!any) return transform.TransformPoint(pivotLocal);
 
         return new Vector3(combined.center.x, combined.min.y, combined.center.z);
     }
+
+    bool warnedNoPivotColliders;
+    float nextAliveLog;
 
     void OnDisable()
     {

@@ -371,12 +371,29 @@ public class ClayCharacterController : MonoBehaviour
 
         if (manageColliders && characterKind == ClayCharacterKind.Blob) SetUpColliders();
 
-        if (characterKind != ClayCharacterKind.Blob && manageColliders)
+        // No warning for Generic: Manage Colliders is hidden in that mode, so there would be
+        // nothing to act on. What DOES matter is whether the authored colliders exist, so
+        // that is what gets checked.
+        if (characterKind != ClayCharacterKind.Blob && positionBody != null)
         {
-            Debug.LogWarning($"{name}: Manage Colliders is on but the character is Generic. " +
-                             "Its colliders are authored by hand, so nothing was generated - " +
-                             "make sure the body has colliders of its own or it will fall " +
-                             "through the world.", this);
+            var own = positionBody.GetComponentsInChildren<Collider>(false);
+            bool anySolid = false;
+
+            for (int i = 0; i < own.Length; i++)
+            {
+                if (own[i] == null || own[i].isTrigger) continue;
+                if (own[i].attachedRigidbody != positionBody) continue;
+
+                anySolid = true;
+                break;
+            }
+
+            if (!anySolid)
+                Debug.LogWarning($"{name}: no solid colliders belong to '{positionBody.name}'. " +
+                                 "A Generic character's colliders are authored by hand, and a " +
+                                 "collider only belongs to the nearest Rigidbody ABOVE it - so " +
+                                 "a collider group parented outside the body does not count.",
+                                 this);
         }
 
         // The radius that touches the ground, not the visible one. Friction ties travel to

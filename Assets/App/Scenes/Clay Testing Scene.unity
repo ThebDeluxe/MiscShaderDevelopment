@@ -756,11 +756,6 @@ Transform:
   m_CorrespondingSourceObject: {fileID: 6524433753190938023, guid: fe03ab5c94aabb840be5e3d8800a8ad4, type: 3}
   m_PrefabInstance: {fileID: 149283914}
   m_PrefabAsset: {fileID: 0}
---- !u!23 &161813426 stripped
-MeshRenderer:
-  m_CorrespondingSourceObject: {fileID: 5456451017969892598, guid: d954b125bba7c7a459c80235c257f95d, type: 3}
-  m_PrefabInstance: {fileID: 1189475377297023917}
-  m_PrefabAsset: {fileID: 0}
 --- !u!1 &199628207
 GameObject:
   m_ObjectHideFlags: 0
@@ -5716,10 +5711,6 @@ PrefabInstance:
       propertyPath: m_Name
       value: EggBoy Character
       objectReference: {fileID: 0}
-    - target: {fileID: 5387963783257060138, guid: fb83ae4e006f99647b02edd8f2937969, type: 3}
-      propertyPath: m_IsActive
-      value: 1
-      objectReference: {fileID: 0}
     - target: {fileID: 7433529999624598250, guid: fb83ae4e006f99647b02edd8f2937969, type: 3}
       propertyPath: m_LocalPosition.x
       value: -3.41
@@ -5760,10 +5751,6 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
-    - target: {fileID: 8014093954198696952, guid: fb83ae4e006f99647b02edd8f2937969, type: 3}
-      propertyPath: targetRenderer
-      value: 
-      objectReference: {fileID: 161813426}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []

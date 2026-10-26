@@ -20,7 +20,7 @@ Material:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: Units_HardShadow_Material
+  m_Name: Unit_ProxyShadow_Material
   m_Shader: {fileID: -6465566751694194690, guid: f63b9b9c5c6e4a1469ef195e0cae8372, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0

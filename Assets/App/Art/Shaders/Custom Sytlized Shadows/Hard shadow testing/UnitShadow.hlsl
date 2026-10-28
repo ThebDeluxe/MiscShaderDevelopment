@@ -38,7 +38,7 @@ float UnitShadowBilinear(float2 uv, float depth)
 }
 #endif
 
-// Receiver: 0 = shadowed, 1 = lit. Radius 0 = hard, 1-2 = soft.
+// Receiver: 0 = shadowed, 1 = lit. Radius in shadow-map texels (0 = 2x2 bilinear only).
 void UnitShadow_float(float3 WorldPos, float Radius, out float Shadow)
 {
 #ifdef SHADERGRAPH_PREVIEW
@@ -48,18 +48,23 @@ void UnitShadow_float(float3 WorldPos, float Radius, out float Shadow)
     Shadow = 1;
     if (all(c.xy > 0) && all(c.xy < 1) && c.z < 1)
     {
-        int r = clamp((int)Radius, 0, 2);
         float texel = 1.0 / _UnitShadowParams.w;
+        float spread = max(Radius, 0.0) * texel * 0.5; // taps span +/- Radius texels
         float sum = 0;
-        [loop] for (int y = -r; y <= r; y++)
-        [loop] for (int x = -r; x <= r; x++)
-            sum += UnitShadowBilinear(c.xy + float2(x, y) * texel, c.z);
-        float n = 2 * r + 1;
-        Shadow = sum / (n * n);
+        float wsum = 0;
+        [unroll]
+        for (int y = -2; y <= 2; y++)
+        [unroll]
+            for (int x = -2; x <= 2; x++)
+            {
+                float w = (3 - abs(x)) * (3 - abs(y)); // tent weights 1,2,3,2,1
+                sum += w * UnitShadowBilinear(c.xy + float2(x, y) * spread, c.z);
+                wsum += w;
+            }
+        Shadow = sum / wsum;
     }
 #endif
 }
-
 // Proxy: writes distance from the light, 0 = near, 1 = far
 void UnitShadowDepth_float(float3 WorldPos, out float Depth)
 {

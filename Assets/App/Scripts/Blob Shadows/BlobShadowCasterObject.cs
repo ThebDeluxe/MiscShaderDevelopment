@@ -8,6 +8,10 @@ public class BlobShadowCasterObject : MonoBehaviour
 {
     public static readonly List<BlobShadowCasterObject> All = new List<BlobShadowCasterObject>();
 
+    [Tooltip("Where the feet are, relative to this object's pivot.")]
+    public Vector3 GroundOffset = Vector3.zero;
+    [Tooltip("How tall the shadow caster is, in metres.")]
+    public float Height = 1.8f;
     public float Radius = 0.5f;
     [Range(0f, 1f)] public float Strength = 0.6f;
 
@@ -32,12 +36,19 @@ public class BlobShadowCasterObject : MonoBehaviour
         _index = -1;
     }
 
-    public float4 GetCasterData(float heightFade)
+    public BlobCasterData GetCasterData(float heightFade)
     {
-        Vector3 p = transform.position;
-        float fade = heightFade > 0f ? math.saturate(1f - p.y / heightFade) : 1f;
-        return new float4(p.x, p.z, Radius, Strength * fade);
+        Vector3 g = transform.TransformPoint(GroundOffset);
+        float fade = heightFade > 0f ? math.saturate(1f - g.y / heightFade) : 1f;
+        return new BlobCasterData
+        {
+            GroundAndRadius = new float4(g.x, g.y, g.z, Radius),
+            HeightStrength  = new float4(Height, Strength * fade, 0f, 0f)
+        };
     }
+
+    void OnDrawGizmosSelected() =>
+        BlobShadowGizmos.Draw(transform.TransformPoint(GroundOffset), Height, Radius);
 
     // Keeps the list clean when "Enter Play Mode Options" skips domain reload.
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

@@ -26,7 +26,7 @@ Transform:
   m_GameObject: {fileID: 354713459235591046}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0.61, y: 0.44, z: 0.53}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
@@ -45,6 +45,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1c82d0d2de4cfc94f8cc19919a5b332c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::BlobShadowCasterAuthoring
+  GroundOffset: {x: 0, y: 0, z: 0}
+  Height: 1.6
   Radius: 1
   Strength: 0.8
 --- !u!1001 &6625099357460910988
@@ -61,7 +63,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
       propertyPath: m_LocalPosition.y
-      value: 0
+      value: 0.75
       objectReference: {fileID: 0}
     - target: {fileID: -8679921383154817045, guid: 12cd35b1b04a94b40be6e0760bd1a3b3, type: 3}
       propertyPath: m_LocalPosition.z
